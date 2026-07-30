@@ -32,7 +32,6 @@
 <meta name="apple-mobile-web-app-title" content="تاجر">
 <link rel="apple-touch-icon" href="icon-192.png">
 <!-- Google AdSense - Manual ad unit only (no auto ads) -->
-<script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-2127631687133199" crossorigin="anonymous"></script>
 <meta name="adsense-ads-only-on" content="#adSenseIns">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Tajawal:wght@400;500;700;900&family=IBM+Plex+Mono:wght@500&family=Cairo:wght@700;900&family=Almarai:wght@700;800&family=Poppins:wght@700;800;900&family=Montserrat:wght@800;900&family=Playfair+Display:wght@700;900&display=swap" rel="stylesheet">
@@ -1167,6 +1166,7 @@ select.f-input option{background:#1A1200;}
 
     <!-- ===== المستخدمون ===== -->
     <div id="adminPaneUsers" style="display:none;">
+      <div id="adminVisits" style="background:rgba(212,160,23,.1);border:1px solid rgba(212,160,23,.3);border-radius:8px;padding:10px 14px;font-size:13px;font-weight:500;color:var(--gold);margin-bottom:12px;">👁️ جاري تحميل الزيارات...</div>
       <!-- بطاقات إحصائية -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;" id="userStatsGrid">
         <div style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px;text-align:center;">
@@ -1345,21 +1345,7 @@ select.f-input option{background:#1A1200;}
 </div>
 
 <!-- AD GATE -->
-<div class="overlay" id="adModal">
-  <div class="ad-modal">
-    <div class="modal-handle"></div>
-    <div style="text-align:center;margin-bottom:14px;">
-      <h3 style="font-size:1.05rem;font-weight:900;" data-i18n="ad-t">⏳ جارٍ تجهيز الخدمة</h3>
-      <p style="color:var(--muted);font-size:.82rem;line-height:1.6;margin-top:4px;" data-i18n="ad-s">لحظات قليلة — الإعلانات تبقي تاجر مجانياً</p>
-    </div>
 
-    <div style="position:relative;">
-      <div class="ad-stage" id="adStage">
-        <div id="adFallback" style="text-align:center;padding:24px;">
-          <div style="font-size:2.4rem;margin-bottom:8px;">📺</div>
-          <div style="font-size:.8rem;color:var(--muted);" data-i18n="ad-load">جارٍ التحميل...</div>
-        </div>
-      </div>
       <div class="ad-timer" id="adTimer">5</div>
     </div>
 
@@ -1483,7 +1469,8 @@ function handleAiError(e, errEl) {
 }
 
 async function aiCall(payload) {
-  if (!session?.access_token) throw new Error('LOGIN_REQUIRED');
+  const needsLogin = payload.needs === 'pro' || payload.needs === 'promax' || payload.action === 'consume' || payload.action === 'status';
+  if (needsLogin && !session?.access_token) throw new Error('LOGIN_REQUIRED');
   const r = await fetch(SB_URL + '/functions/v1/ai', {
     method: 'POST',
     headers: {
@@ -2017,7 +2004,7 @@ async function doSetNewPassword() {
 
 // ---------- تغيير كلمة السر داخل التطبيق ----------
 function openChangePass() {
-  if (!session) { showToast(M('msg_needlogin')); openAuth(); return; }
+  if (!session) { openAuth(); return; }
   ['pw-cur','pw-new','pw-new2'].forEach(id => { document.getElementById(id).value = ''; });
   document.getElementById('pw-err').style.display = 'none';
   document.getElementById('pw-ok').style.display  = 'none';
@@ -2148,10 +2135,10 @@ async function payApi(payload) {
   if (!session?.access_token) throw new Error('LOGIN_REQUIRED');
   const r = await fetch(SB_URL + '/functions/v1/payments', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json', 'apikey': SB_KEY,
-      'Authorization': 'Bearer ' + session.access_token
-    },
+    headers: Object.assign(
+      { 'Content-Type': 'application/json', 'apikey': SB_KEY },
+      session?.access_token ? { 'Authorization': 'Bearer ' + session.access_token } : {}
+    ),
     body: JSON.stringify(payload)
   });
   const d = await r.json().catch(() => ({}));
@@ -2161,7 +2148,7 @@ async function payApi(payload) {
 
 // فتح شاشة الدفع
 async function openPay(tier) {
-  if (!session) { showToast(M('msg_needlogin')); openAuth(); return; }
+  if (!session) { openAuth(); return; }
   payTier = tier;
   showScreen('sv-pay');
   document.getElementById('payErr').style.display = 'none';
@@ -2461,7 +2448,7 @@ function escapeHtmlCx(s) {
 
 // ---- شاشة التاجر: تقديم شكوى + عرض شكاواه السابقة ----
 function goComplaintForm() {
-  if (!session) { showToast(M('msg_needlogin')); openAuth(); return; }
+  if (!session) { openAuth(); return; }
   showScreen('sv-complaint');
   renderComplaintForm();
 }
@@ -2621,10 +2608,10 @@ async function usersApi(payload) {
   if (!session?.access_token) throw new Error('LOGIN_REQUIRED');
   const r = await fetch(SB_URL + '/functions/v1/admin-users', {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json', 'apikey': SB_KEY,
-      'Authorization': 'Bearer ' + session.access_token
-    },
+    headers: Object.assign(
+      { 'Content-Type': 'application/json', 'apikey': SB_KEY },
+      session?.access_token ? { 'Authorization': 'Bearer ' + session.access_token } : {}
+    ),
     body: JSON.stringify(payload)
   });
   const d = await r.json().catch(() => ({}));
@@ -2908,13 +2895,10 @@ function setBilling(cycle) {
 
 // فتح خدمة برو (أو عرض نافذة الاشتراك)
 // ---------- نظام الإعلانات ----------
-const ADSENSE_PUB  = 'ca-pub-2127631687133199';
 const ADSENSE_SLOT = '2025705131';           // Tajer Interstitial
-const AD_SECONDS   = 5;
-let adTimer = null, adPending = null, adSecs = AD_SECONDS;
 
 function goFree(svc) {
-  if (!session) { showToast(M('msg_needlogin')); openAuth(); return; }
+  if (!session) { openAuth(); return; }
   if (quotaLeft !== null && quotaLeft <= 0) {
     document.getElementById('subModal').classList.add('open');
     return;
@@ -2925,9 +2909,9 @@ function goFree(svc) {
 }
 
 function openAdModal() {
-  const modal = document.getElementById('adModal');
-  const timer = document.getElementById('adTimer');
-  const btn   = document.getElementById('adGo');
+  const modal = document.getElementById('adModalRemoved');
+  const timer = document.getElementById('adTimerRemoved');
+  const btn   = document.getElementById('adGoRemoved');
   modal.classList.add('open');
 
   adSecs = AD_SECONDS;
@@ -2950,34 +2934,11 @@ function openAdModal() {
   }, 1000);
 }
 
-// إعلان جديد في كل مرة
-function loadAdUnit() {
-  const stage = document.getElementById('adStage');
-  if (!ADSENSE_SLOT) return;   // لم تُنشأ الوحدة بعد → يبقى العنصر البديل
-  try {
-    stage.innerHTML =
-      '<ins class="adsbygoogle" style="display:block;width:100%;min-height:250px;"' +
-      ' data-ad-client="' + ADSENSE_PUB + '"' +
-      ' data-ad-slot="' + ADSENSE_SLOT + '"' +
-      ' data-ad-format="auto" data-full-width-responsive="true"></ins>';
-    (window.adsbygoogle = window.adsbygoogle || []).push({});
-  } catch (e) {}
-}
 
-function closeAdModal() {
-  clearInterval(adTimer);
-  document.getElementById('adModal').classList.remove('open');
-  adPending = null;
-}
 
-function unlockAfterAd() {
-  if (!adPending) return;
-  const svc = adPending;
-  adPending = null;
-  clearInterval(adTimer);
-  document.getElementById('adModal').classList.remove('open');
-  setTimeout(() => go(svc), 200);
-}
+
+
+
 
 // ========== PRO MAX BUILDERS — CHAT-BASED ==========
 let chatState = {
@@ -3127,7 +3088,7 @@ function openBuildsTopup() {
 
 
 function goPro(svc) {
-  if (!session) { showToast(M('msg_needlogin')); openAuth(); return; }
+  if (!session) { openAuth(); return; }
   if (isPro()) { go(svc); return; }
   pendingProSvc = svc;
   document.getElementById('subModal').classList.add('open');
@@ -3135,7 +3096,7 @@ function goPro(svc) {
 
 // خدمات برو ماكس
 function goMax(svc) {
-  if (!session) { showToast(M('msg_needlogin')); openAuth(); return; }
+  if (!session) { openAuth(); return; }
   if (isProMax()) {
     go(svc);
     if (svc === 'website' || svc === 'app') initChat(svc);
@@ -3155,7 +3116,7 @@ function startCheckout()    { openPay('pro'); }
 function startCheckoutMax() { openPay('promax'); }
 
 async function startCheckoutTopup() {
-  if (!session) { showToast(M('msg_needlogin')); openAuth(); return; }
+  if (!session) { openAuth(); return; }
   payTier = 'builds_topup';
   showScreen('sv-pay');
   document.getElementById('payErr').style.display = 'none';
@@ -3389,7 +3350,7 @@ let logoTab = 'manual';
 
 // فتح خدمة الشعار — يبدأ مباشرة بالمحرر اليدوي (الذكاء الاصطناعي معطَّل مؤقتاً)
 function goLogo() {
-  if (!session) { showToast(M('msg_needlogin')); openAuth(); return; }
+  if (!session) { openAuth(); return; }
   if (quotaLeft !== null && quotaLeft <= 0) {
     document.getElementById('subModal').classList.add('open');
     return;
@@ -3962,6 +3923,10 @@ function finOb() { localStorage.setItem('tob','1'); showScreen('app'); nav('h');
 
 // ========== INIT ==========
 window.addEventListener('load', () => {
+  // عداد الزيارات — يُسجَّل كل زيارة حقيقية
+  setTimeout(() => {
+    aiCall({ action: 'visit' }).catch(() => {});
+  }, 2000);
   setTimeout(() => { document.getElementById('sBar').style.width = '100%'; }, 80);
   setTimeout(() => {
     if (catchRecoveryLink()) { openSetNewPassword(); applyLang(lang); return; }
@@ -3976,8 +3941,8 @@ window.addEventListener('load', () => {
 document.getElementById('subModal').addEventListener('click', e => {
   if (e.target === document.getElementById('subModal')) closeSubModal();
 });
-document.getElementById('adModal').addEventListener('click', e => {
-  if (e.target === document.getElementById('adModal')) closeAdModal();
+document.getElementById('adModalRemoved').addEventListener('click', e => {
+  if (e.target === document.getElementById('adModalRemoved')) closeAdModal();
 });
 document.getElementById('maxModal').addEventListener('click', e => {
   if (e.target === document.getElementById('maxModal')) closeMaxModal();
