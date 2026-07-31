@@ -1154,12 +1154,20 @@ select.f-input option{background:#1A1200;}
 
     <!-- ===== طلبات الدفع ===== -->
     <div id="adminPaneOrders">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;">
+        <div style="font-size:11px;color:var(--muted);" id="ordersLastUpdate">آخر تحديث: الآن</div>
+        <button onclick="loadAdminOrders()" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);border-radius:7px;padding:5px 10px;font-size:11px;color:var(--gold);font-family:Cairo,sans-serif;cursor:pointer;">🔄 تحديث</button>
+      </div>
       <div id="adminLoad" style="display:none;"><div class="loading"><span></span><span></span><span></span></div></div>
       <div id="adminList"></div>
     </div>
 
     <!-- ===== المستخدمون ===== -->
     <div id="adminPaneUsers" style="display:none;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
+        <div style="font-size:11px;color:var(--muted);" id="usersLastUpdate">آخر تحديث: الآن</div>
+        <button onclick="loadUsers()" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);border-radius:7px;padding:5px 10px;font-size:11px;color:var(--gold);font-family:Cairo,sans-serif;cursor:pointer;">🔄 تحديث</button>
+      </div>
       <div id="adminVisits" style="background:rgba(212,160,23,.1);border:1px solid rgba(212,160,23,.3);border-radius:8px;padding:10px 14px;font-size:13px;font-weight:500;color:var(--gold);margin-bottom:12px;">👁️ جاري تحميل الزيارات...</div>
       <!-- بطاقات إحصائية -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;" id="userStatsGrid">
@@ -2438,6 +2446,13 @@ let adminSearchTimer = null;
 async function openAdmin() {
   showScreen('sv-admin');
   setAdminTab('orders');
+  // تحديث تلقائي كل 30 ثانية
+  if (window._adminRefreshTimer) clearInterval(window._adminRefreshTimer);
+  window._adminRefreshTimer = setInterval(() => {
+    const tab = document.querySelector('.bill-btn.active')?.id?.replace('adminTab','')?.toLowerCase();
+    if (tab === 'orders') loadAdminOrders();
+    else if (tab === 'users') loadUsers();
+  }, 30000);
 }
 
 // ========== MERCHANT COMPLAINTS ==========
@@ -2697,6 +2712,8 @@ async function loadAdminVisits() {
 
 async function loadUsers() {
   loadAdminVisits();
+  const usEl = document.getElementById('usersLastUpdate');
+  if (usEl) usEl.textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar-DZ');
   const load = document.getElementById('usersLoad');
   const list = document.getElementById('usersList');
   load.style.display = 'block';
@@ -2768,17 +2785,26 @@ async function loadAdminOrders() {
     const d = await payApi({ action: 'admin_list' });
     if (!d.orders?.length) { list.innerHTML = '<div class="empty"><div class="e-icon">📭</div><p>لا توجد طلبات بعد</p></div>'; return; }
     const badge = { pending: 'badge-pending', paid: 'badge-paid', rejected: 'badge-rejected' };
+    // تحديث وقت آخر تحديث
+    const upEl = document.getElementById('ordersLastUpdate');
+    if (upEl) upEl.textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar-DZ');
+
+    const stMap = { awaiting:'⏳ ينتظر الدفع', pending:'🔍 قيد المراجعة', paid:'✅ مدفوع', rejected:'❌ مرفوض', expired:'⏰ انتهت المهلة' };
+    const stColor = { awaiting:'var(--gold)', pending:'#3498DB', paid:'var(--green)', rejected:'var(--red)', expired:'var(--muted)' };
+    const methodName = (m) => m === 'usdt' ? '₮ USDT' : m === 'chargily' ? '🇩🇿 بطاقة' : m === 'nowpay' ? '🌐 دولية' : m;
+    const tierName = (t) => t === 'promax' ? '👑 برو ماكس' : t === 'builds_topup' ? '⚡ توليدات' : '👑 برو';
     list.innerHTML = d.orders.map(o => `
-      <div class="order-row">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
-          <strong>${o.tier === 'promax' ? '👑 برو ماكس' : '👑 برو'} · ${o.cycle === 'yearly' ? 'سنوي' : 'شهري'}</strong>
-          <span class="${badge[o.status]}">${o.status}${o.verified_auto ? ' ⚡' : ''}</span>
+      <div class="order-row" style="border-right:3px solid ${stColor[o.status]||'var(--line)'};padding-right:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+          <strong style="font-size:.85rem;">${tierName(o.tier)} · ${o.cycle === 'yearly' ? 'سنوي' : 'شهري'}</strong>
+          <span style="font-size:.72rem;font-weight:700;color:${stColor[o.status]||'var(--muted)'};">${stMap[o.status]||o.status}${o.verified_auto ? ' ⚡' : ''}</span>
         </div>
         <div style="font-size:.76rem;color:var(--muted);">${o.email || ''}</div>
-        <div style="font-size:.8rem;margin-top:4px;">💵 ${o.amount_usd}$ · ${o.method === 'usdt' ? '₮ USDT' : '🇩🇿 Chargily'}</div>
-        ${o.tx_ref ? `<div class="code-box" style="margin-top:6px;font-size:.62rem;padding:8px;">${o.tx_ref}</div>` : ''}
+        <div style="font-size:.78rem;margin-top:4px;">💵 ${o.amount_usd}$ · ${methodName(o.method)}</div>
+        ${o.amount_dzd ? `<div style="font-size:.72rem;color:var(--muted);">🇩🇿 ${Number(o.amount_dzd).toLocaleString('ar-DZ')} دج</div>` : ''}
+        ${o.tx_ref ? `<div class="code-box" style="margin-top:5px;font-size:.6rem;padding:6px;">${o.tx_ref}</div>` : ''}
         <div style="font-size:.68rem;color:var(--muted);margin-top:4px;font-family:'IBM Plex Mono',monospace;">${new Date(o.created_at).toLocaleString('ar-DZ')}</div>
-        ${o.status === 'pending' ? `
+        ${(o.status === 'pending' || o.status === 'awaiting') ? `
           <div class="result-acts" style="margin-top:8px;">
             <button class="btn-copy" style="background:rgba(52,152,219,.15);color:#3498DB;border-color:rgba(52,152,219,.3);" onclick="recheckOrder('${o.id}')">🔍 فحص</button>
             <button class="btn-copy" style="background:rgba(39,174,96,.15);color:var(--green);border-color:rgba(39,174,96,.3);" onclick="reviewOrder('${o.id}',true)">✅ تفعيل</button>
