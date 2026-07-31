@@ -423,7 +423,7 @@ select.f-input option{background:#1A1200;}
         <div class="best-badge maxb" data-i18n="maxBadge">الأقوى</div>
         <div class="plan-name" data-i18n="pmN">👑 تاجر برو ماكس</div>
         <div class="plan-price"><span id="maxPrice">30$</span><span id="pm3"> /شهر</span></div>
-        <div id="maxDzd" style="font-size:.82rem;color:var(--gold-l);font-weight:700;margin-bottom:2px;">≈ 7,200 دج /شهر</div>
+        <div id="maxDzd" style="font-size:.82rem;color:var(--gold-l);font-weight:700;margin-bottom:2px;">≈ 7,500 دج /شهر</div>
         <div id="maxPriceNote" style="font-size:.76rem;color:var(--muted);margin-bottom:6px;display:none;" data-i18n="maxPriceNote">350$ سنوياً — أي 29.2$ شهرياً</div>
         <ul class="plan-feats">
           <li class="yes"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg><span data-i18n="pm1">كل مزايا برو</span></li>
@@ -3006,7 +3006,7 @@ function setBilling(cycle) {
     if (mPer)   mPer.textContent   = t['perYear'] || ' /سنة';
     if (mNote)  mNote.style.display = 'block';
     if (mBtn)   mBtn.textContent = t['maxBtnY'] || '👑 برو ماكس سنوياً — 350$';
-    if (mDzd)   mDzd.textContent = '≈ 87,500 دج /سنة';
+    if (mDzd)   mDzd.textContent = '≈ 88,000 دج /سنة';
   } else {
     price.textContent = '12$';
     per.textContent   = t['pm2'] || ' /شهر';
@@ -3017,7 +3017,7 @@ function setBilling(cycle) {
     if (mPer)   mPer.textContent   = t['pm2'] || ' /شهر';
     if (mNote)  mNote.style.display = 'none';
     if (mBtn)   mBtn.textContent = t['maxBtn'] || '👑 اشترك في برو ماكس — 30$/شهر';
-    if (mDzd)   mDzd.textContent = '≈ 7,200 دج /شهر';
+    if (mDzd)   mDzd.textContent = '≈ 7,500 دج /شهر';
   }
 }
 
