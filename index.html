@@ -1141,15 +1141,12 @@ select.f-input option{background:#1A1200;}
       <button class="bill-btn active" id="adminTabOrders" onclick="setAdminTab('orders')">💳 <span data-i18n="adm-tab1">طلبات الدفع</span></button>
       <button class="bill-btn" id="adminTabUsers" onclick="setAdminTab('users')">👥 <span data-i18n="adm-tab2">المستخدمون</span></button>
       <button class="bill-btn" id="adminTabComplaints" onclick="setAdminTab('complaints')">📋 <span data-i18n="adm-tab-cx">شكاوى التجار</span></button>
-      <button class="bill-btn" id="adminTabStats" onclick="setAdminTab('stats')">📊 الإحصاءات</button>
     </div>
 
     <!-- ===== شكاوى التجار ===== -->
     <div id="adminPaneComplaints" style="display:none;">
       <div id="cxAdminLoad" style="display:none;"><div class="loading"><span></span><span></span><span></span></div>
-      <div id="adminPaneStats" style="display:none;padding:4px 0;">
-        <div style="font-size:13px;font-weight:500;color:var(--gold);margin-bottom:10px;">📊 إحصاءات الاستخدام</div>
-        <div id="statsLoad" style="display:none;text-align:center;padding:20px;color:var(--muted);font-size:13px;">⏳ جاري التحميل...</div>
+      <div id="statsLoad" style="display:none;text-align:center;padding:20px;color:var(--muted);font-size:13px;">⏳ جاري التحميل...</div>
         <div id="statsContent" style="color:var(--text,#e8e8e8);"></div>
       </div></div>
       <div id="cxAdminList"></div>
@@ -2597,7 +2594,6 @@ async function adminCxChangeStatus() {
 function adminRefresh() {
   if (adminTab === 'orders') loadAdminOrders();
   else if (adminTab === 'complaints') loadAdminComplaints();
-  else if (tab === 'stats') loadAdminStats();
   else { loadUsers(); loadAdminVisits(); }
 }
 
@@ -2606,14 +2602,11 @@ function setAdminTab(tab) {
   document.getElementById('adminTabOrders').classList.toggle('active', tab === 'orders');
   document.getElementById('adminTabUsers').classList.toggle('active', tab === 'users');
   document.getElementById('adminTabComplaints').classList.toggle('active', tab === 'complaints');
-  document.getElementById('adminTabStats') && document.getElementById('adminTabStats').classList.toggle('active', tab === 'stats');
   document.getElementById('adminPaneOrders').style.display     = tab === 'orders'     ? 'block' : 'none';
   document.getElementById('adminPaneUsers').style.display      = tab === 'users'      ? 'block' : 'none';
   document.getElementById('adminPaneComplaints').style.display = tab === 'complaints' ? 'block' : 'none';
-  document.getElementById('adminPaneStats') && (document.getElementById('adminPaneStats').style.display = tab === 'stats' ? 'block' : 'none');
   if (tab === 'orders') loadAdminOrders();
   else if (tab === 'complaints') loadAdminComplaints();
-  else if (tab === 'stats') loadAdminStats();
   else loadUsers();
 }
 
@@ -2654,79 +2647,6 @@ async function adminToggleBan(id, banned) {
     showToast(banned ? '🚫 تم الحظر' : '✅ رُفع الحظر');
     loadUsers();
   } catch (e) { showToast(M('msg_err')); }
-}
-
-async function loadAdminStats() {
-  const load = document.getElementById('statsLoad');
-  const content = document.getElementById('statsContent');
-  load.style.display = 'block'; content.innerHTML = '';
-  try {
-    const r = await fetch(SB_URL + '/functions/v1/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY,
-        'Authorization': 'Bearer ' + (session?.access_token || '') },
-      body: JSON.stringify({ action: 'get_stats' })
-    });
-    const d = await r.json();
-    if (!d.services?.length && !d.summary) {
-      content.innerHTML = '<div style="text-align:center;padding:20px;color:var(--muted);font-size:13px;">لا توجد بيانات بعد — تبدأ تتراكم بعد أول استخدام</div>';
-      return;
-    }
-    const total = d.summary?.total || 0;
-    const anon  = d.summary?.anon  || 0;
-    const registered = total - anon;
-    const anonPct = total ? Math.round(anon/total*100) : 0;
-    const FREE_SVCS = new Set(['d','tr','seo','so','em','re','pr2','lp','ad2','rp','nm','bg','lg']);
-    const svcNames = {
-      d:'✍️ وصف المنتج', tr:'🌍 الترجمة', seo:'🔍 SEO', so:'📱 سوشيال',
-      em:'📧 البريد', re:'💬 الردود', pr2:'📦 إدخال المنتجات', lp:'🏠 صفحة الهبوط',
-      ad2:'📢 الإعلانات', rp:'📊 التقارير', nm:'🏷️ التسمية', bg:'🗑️ إزالة الخلفية',
-      lg:'🎨 الشعار', pc:'💰 حاسبة الربح', vs:'🎬 السكريبت', wp:'🎯 المنتج الرابح',
-      oc:'📞 تأكيد الطلبات', cm:'💬 ردود التعليقات', cp2:'📅 خطة المحتوى',
-      website:'🌐 بناء موقع', app:'📱 بناء تطبيق'
-    };
-    let html = `
-      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:14px;">
-        <div style="background:rgba(212,160,23,.1);border:1px solid rgba(212,160,23,.25);border-radius:10px;padding:10px;text-align:center;">
-          <div style="font-size:22px;font-weight:700;color:var(--gold);">${total}</div>
-          <div style="font-size:11px;color:var(--muted);">إجمالي الاستخدامات</div>
-        </div>
-        <div style="background:rgba(52,152,219,.1);border:1px solid rgba(52,152,219,.25);border-radius:10px;padding:10px;text-align:center;">
-          <div style="font-size:22px;font-weight:700;color:#3498DB;">${anon}</div>
-          <div style="font-size:11px;color:var(--muted);">زوار مجهولون</div>
-        </div>
-        <div style="background:rgba(39,174,96,.1);border:1px solid rgba(39,174,96,.25);border-radius:10px;padding:10px;text-align:center;">
-          <div style="font-size:22px;font-weight:700;color:var(--green);">${registered}</div>
-          <div style="font-size:11px;color:var(--muted);">مستخدمون مسجّلون</div>
-        </div>
-      </div>
-      <div style="margin-bottom:14px;">
-        <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">نسبة المجهولين: ${anonPct}%</div>
-        <div style="background:var(--ink3);border-radius:999px;height:6px;overflow:hidden;">
-          <div style="background:#3498DB;height:100%;width:${anonPct}%;transition:.3s;"></div>
-        </div>
-      </div>
-      <div style="font-size:12px;font-weight:500;color:var(--gold);margin-bottom:8px;">🔥 أكثر الخدمات استخداماً</div>`;
-
-    (d.services || []).forEach((s, i) => {
-      const isFree = FREE_SVCS.has(s.service_id);
-      const pct = total ? Math.round(s.count/total*100) : 0;
-      html += `<div style="margin-bottom:8px;">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
-          <div style="font-size:12px;">${svcNames[s.service_id]||s.service_name||s.service_id}
-            <span style="font-size:10px;background:${isFree?'rgba(52,152,219,.15)':'rgba(212,160,23,.15)'};color:${isFree?'#3498DB':'var(--gold)'};padding:1px 5px;border-radius:4px;margin-right:4px;">${isFree?'مجاني':'مدفوع'}</span>
-          </div>
-          <span style="font-size:12px;font-weight:700;color:var(--text);">${s.count}</span>
-        </div>
-        <div style="background:var(--ink3);border-radius:999px;height:4px;overflow:hidden;">
-          <div style="background:${isFree?'#3498DB':'var(--gold)'};height:100%;width:${pct}%;"></div>
-        </div>
-      </div>`;
-    });
-    content.innerHTML = html;
-  } catch(e) {
-    content.innerHTML = '<div style="color:var(--red);font-size:13px;padding:8px;">خطأ في التحميل</div>';
-  } finally { load.style.display = 'none'; }
 }
 
 async function loadUserOrders(userId, email, containerEl) {
