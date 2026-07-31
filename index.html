@@ -2598,7 +2598,7 @@ function adminRefresh() {
   if (adminTab === 'orders') loadAdminOrders();
   else if (adminTab === 'complaints') loadAdminComplaints();
   else if (tab === 'stats') loadAdminStats();
-  else loadUsers();
+  else { loadUsers(); loadAdminVisits(); }
 }
 
 function setAdminTab(tab) {
@@ -2758,7 +2758,25 @@ async function loadUserOrders(userId, email, containerEl) {
   }
 }
 
+async function loadAdminVisits() {
+  try {
+    const r = await fetch(SB_URL + '/functions/v1/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + (session?.access_token || '') },
+      body: JSON.stringify({ action: 'get_visits' })
+    });
+    const d = await r.json();
+    const el = document.getElementById('adminVisits');
+    if (el) el.textContent = '👁️ إجمالي الزيارات: ' + (d.visits || 0).toLocaleString('ar-DZ');
+  } catch(e) {
+    const el = document.getElementById('adminVisits');
+    if (el) el.textContent = '👁️ خطأ في تحميل الزيارات';
+  }
+}
+
 async function loadUsers() {
+  loadAdminVisits();
   const load = document.getElementById('usersLoad');
   const list = document.getElementById('usersList');
   load.style.display = 'block';
