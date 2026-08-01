@@ -381,7 +381,7 @@ select.f-input option{background:#1A1200;}
       </div>
 
       <!-- BILLING TOGGLE -->
-      <div class="billing-toggle" style="position:sticky;top:0;z-index:10;background:var(--bg,#0a1628);padding-bottom:4px;margin-bottom:8px;">
+      <div class="billing-toggle">
         <button class="bill-btn active" id="billMonthly" data-i18n="billMonthly" onclick="setBilling('monthly')">شهري</button>
         <button class="bill-btn" id="billYearly" data-i18n="billYearly" onclick="setBilling('yearly')">سنوي <span class="save-badge">وفّر 17%</span></button>
       </div>
@@ -692,7 +692,7 @@ select.f-input option{background:#1A1200;}
 <!-- LOGO DESIGN -->
 <div class="screen" id="sv-logo">
   <div class="hdr"><button class="back-btn" onclick="back()"><svg viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button><div class="hdr-info"><h3 id="lg-t" data-i18n="lg-t">🎨 تصميم الشعار</h3><p id="lg-s" data-i18n="lg-s2">صمّمه بنفسك في ثوانٍ</p></div></div>
-  <div class="svc-body" style="overflow-y:auto;flex:1;padding-bottom:80px;">
+  <div class="svc-body">
 
     <div class="billing-toggle" style="display:none;">
       <button class="bill-btn active" id="logoTabAi" onclick="setLogoTab('ai')">🤖 <span data-i18n="lg-tab1">بالذكاء الاصطناعي</span></button>
@@ -1129,7 +1129,7 @@ select.f-input option{background:#1A1200;}
 </div>
 
 <!-- ADMIN SCREEN -->
-<div class="screen" id="sv-admin" style="display:flex;flex-direction:column;overflow:hidden;">
+<div class="screen" id="sv-admin">
   <div class="hdr">
     <button class="back-btn" onclick="back()"><svg viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button>
     <div class="hdr-info"><h3>🛠️ لوحة المالك</h3></div>
