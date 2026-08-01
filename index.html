@@ -1160,6 +1160,7 @@ select.f-input option{background:#1A1200;}
       </div>
       <div id="adminLoad" style="display:none;"><div class="loading"><span></span><span></span><span></span></div></div>
       <div id="adminList"></div>
+      <div id="ordersPagination" style="display:flex;justify-content:center;gap:8px;margin-top:10px;"></div>
     </div>
 
     <!-- ===== المستخدمون ===== -->
@@ -2777,12 +2778,16 @@ async function loadUsers() {
   } finally { load.style.display = 'none'; }
 }
 
-async function loadAdminOrders() {
+let adminOrdersPage = 0;
+const ORDERS_PER_PAGE = 20;
+
+async function loadAdminOrders(page = 0) {
+  adminOrdersPage = page;
   const load = document.getElementById('adminLoad');
   const list = document.getElementById('adminList');
   load.style.display = 'block'; list.innerHTML = '';
   try {
-    const d = await payApi({ action: 'admin_list' });
+    const d = await payApi({ action: 'admin_list', page, limit: ORDERS_PER_PAGE });
     if (!d.orders?.length) { list.innerHTML = '<div class="empty"><div class="e-icon">📭</div><p>لا توجد طلبات بعد</p></div>'; return; }
     const badge = { pending: 'badge-pending', paid: 'badge-paid', rejected: 'badge-rejected' };
     // تحديث وقت آخر تحديث
@@ -2793,6 +2798,19 @@ async function loadAdminOrders() {
     const stColor = { awaiting:'var(--gold)', pending:'#3498DB', paid:'var(--green)', rejected:'var(--red)', expired:'var(--muted)' };
     const methodName = (m) => m === 'usdt' ? '₮ USDT' : m === 'chargily' ? '🇩🇿 بطاقة' : m === 'nowpay' ? '🌐 دولية' : m;
     const tierName = (t) => t === 'promax' ? '👑 برو ماكس' : t === 'builds_topup' ? '⚡ توليدات' : '👑 برو';
+    // ترقيم الصفحات
+    const pg = document.getElementById('ordersPagination');
+    if (pg) {
+      const total = d.total || d.orders.length;
+      const totalPages = Math.ceil((d.total_all || total) / ORDERS_PER_PAGE);
+      if (totalPages > 1) {
+        pg.innerHTML =
+          `<button onclick="loadAdminOrders(${page-1})" ${page===0?'disabled':''} style="background:rgba(255,255,255,.07);border:1px solid var(--line);border-radius:7px;padding:5px 10px;font-size:11px;color:var(--muted);font-family:Cairo,sans-serif;cursor:pointer;">السابق</button>` +
+          `<span style="font-size:11px;color:var(--muted);padding:5px 8px;">${page+1} / ${totalPages}</span>` +
+          `<button onclick="loadAdminOrders(${page+1})" ${page>=totalPages-1?'disabled':''} style="background:rgba(255,255,255,.07);border:1px solid var(--line);border-radius:7px;padding:5px 10px;font-size:11px;color:var(--muted);font-family:Cairo,sans-serif;cursor:pointer;">التالي</button>`;
+      } else { pg.innerHTML = ''; }
+    }
+
     list.innerHTML = d.orders.map(o => `
       <div class="order-row" style="border-right:3px solid ${stColor[o.status]||'var(--line)'};padding-right:8px;">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
@@ -2813,7 +2831,9 @@ async function loadAdminOrders() {
       </div>`).join('');
   } catch (e) {
     list.innerHTML = '<div class="err-box">' + M('msg_err') + '</div>';
-  } finally { load.style.display = 'none'; }
+  } finally {
+    load.style.display = 'none';
+  }
 }
 
 async function recheckOrder(id) {
