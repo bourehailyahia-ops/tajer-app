@@ -267,7 +267,60 @@ select.f-input option{background:#1A1200;}
 /* TAGS */
 .tag-row{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px;}
 .kw-tag{background:var(--gold-dim);color:var(--gold);font-size:.76rem;font-weight:700;padding:4px 11px;border-radius:999px;}
+.seo-h1{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
 </style>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "name": "تاجر",
+      "alternateName": "Tajer",
+      "applicationCategory": "BusinessApplication",
+      "operatingSystem": "Web, Android, iOS",
+      "url": "https://tajer-app.vercel.app/",
+      "description": "منصة عربية بالذكاء الاصطناعي لأصحاب المتاجر الإلكترونية: كتابة وصف المنتجات، الترجمة، تحسين SEO، منشورات السوشيال ميديا، سكريبت إعلانات تيك توك، وحاسبة الربح.",
+      "inLanguage": "ar",
+      "offers": [
+        { "@type": "Offer", "name": "الخطة المجانية", "price": "0", "priceCurrency": "DZD" },
+        { "@type": "Offer", "name": "تاجر برو", "price": "2880", "priceCurrency": "DZD" },
+        { "@type": "Offer", "name": "تاجر برو ماكس", "price": "7200", "priceCurrency": "DZD" }
+      ]
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        {
+          "@type": "Question",
+          "name": "كيف أكتب وصف منتج احترافي بالذكاء الاصطناعي؟",
+          "acceptedAnswer": { "@type": "Answer", "text": "أدخل اسم المنتج وبعض التفاصيل في خدمة وصف المنتج داخل تاجر، واختر اللغة والأسلوب، وسيولّد الذكاء الاصطناعي وصفاً تسويقياً جاهزاً للنشر خلال ثوانٍ. الخدمة مجانية ولا تحتاج تسجيل دخول." }
+        },
+        {
+          "@type": "Question",
+          "name": "هل تاجر مجاني؟",
+          "acceptedAnswer": { "@type": "Answer", "text": "نعم، 13 خدمة مجانية بالكامل بدون تسجيل دخول، منها وصف المنتجات والترجمة وتحسين SEO ومنشورات السوشيال ميديا وإزالة خلفية الصور. الخدمات الاحترافية متاحة عبر اشتراك برو من 2880 دج شهرياً." }
+        },
+        {
+          "@type": "Question",
+          "name": "كيف أكتب سكريبت إعلان تيك توك لمنتجي؟",
+          "acceptedAnswer": { "@type": "Answer", "text": "خدمة سكريبت الفيديو في تاجر تكتب نص إعلان تيك توك أو ريلز جاهزاً للتصوير بالدارجة الجزائرية أو المغربية أو العربية الفصحى، مع اختيار مدة الفيديو وأسلوب الجذب." }
+        },
+        {
+          "@type": "Question",
+          "name": "كيف أحسب الربح الصافي في التجارة الإلكترونية؟",
+          "acceptedAnswer": { "@type": "Answer", "text": "حاسبة الربح في تاجر تحسب ربحك الصافي بعد خصم سعر الشراء وتكلفة الإعلانات والتوصيل ونسبة الطلبات المرفوضة، وتعرض النتيجة بالدينار الجزائري أو الدرهم أو الدولار." }
+        },
+        {
+          "@type": "Question",
+          "name": "ما هي طرق الدفع المتاحة في تاجر؟",
+          "acceptedAnswer": { "@type": "Answer", "text": "يمكن الدفع بالبطاقة الذهبية EDAHABIA أو بطاقة CIB داخل الجزائر، أو ببطاقة Visa و Mastercard الدولية، أو بعملة USDT الرقمية. يُفعَّل الاشتراك تلقائياً فور نجاح الدفع." }
+        }
+      ]
+    }
+  ]
+}
+</script>
 </head>
 <body>
 
@@ -325,6 +378,7 @@ select.f-input option{background:#1A1200;}
     <div class="scroll">
       <div class="home-body">
         <div class="welcome-card">
+          <h1 class="seo-h1">تاجر — أدوات التجارة الإلكترونية بالذكاء الاصطناعي للمتاجر العربية</h1>
           <h2 id="wH" data-i18n="wH">مرحباً، تاجر 👋</h2>
           <p id="wP" data-i18n="wP">ماذا تريد أن تنجز اليوم؟</p>
           <div class="plan-tag">⚡ <span id="wPlan" data-i18n="wPlan">الخطة المجانية</span></div>
