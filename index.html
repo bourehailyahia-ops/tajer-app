@@ -1229,7 +1229,7 @@ select.f-input option{background:#1A1200;}
         <div style="font-size:11px;color:var(--muted);" id="usersLastUpdate">آخر تحديث: الآن</div>
         <button onclick="loadUsers()" style="background:rgba(201,168,76,.1);border:1px solid rgba(201,168,76,.3);border-radius:7px;padding:5px 10px;font-size:11px;color:var(--gold);font-family:Cairo,sans-serif;cursor:pointer;">🔄 تحديث</button>
       </div>
-      <div id="adminVisits" style="background:rgba(212,160,23,.1);border:1px solid rgba(212,160,23,.3);border-radius:8px;padding:10px 14px;font-size:13px;font-weight:500;color:var(--gold);margin-bottom:12px;">👁️ جاري تحميل الزيارات...</div>
+      <div id="adminVisits" style="margin-bottom:14px;"><div style="font-size:12px;color:var(--muted);padding:10px;text-align:center;">👁️ جاري تحميل الزيارات...</div></div>
       <!-- بطاقات إحصائية -->
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;" id="userStatsGrid">
         <div style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px;text-align:center;">
@@ -2755,19 +2755,66 @@ async function loadUserOrders(userId, email, containerEl) {
 }
 
 async function loadAdminVisits() {
+  const el = document.getElementById('adminVisits');
+  if (!el) return;
   try {
     const r = await fetch(SB_URL + '/functions/v1/ai', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY,
         'Authorization': 'Bearer ' + (session?.access_token || '') },
-      body: JSON.stringify({ action: 'get_visits' })
+      body: JSON.stringify({ action: 'get_visit_stats' })
     });
     const d = await r.json();
-    const el = document.getElementById('adminVisits');
-    if (el) el.textContent = '👁️ إجمالي الزيارات: ' + (d.visits || 0).toLocaleString('ar-DZ');
+    if (d.error) throw new Error(d.error);
+
+    const n = (v) => Number(v || 0).toLocaleString('ar-DZ');
+
+    // مقارنة اليوم بالأمس
+    const t = Number(d.today || 0), y = Number(d.yesterday || 0);
+    let trend = '';
+    if (y > 0) {
+      const pct = Math.round(((t - y) / y) * 100);
+      trend = pct > 0 ? `<span style="color:var(--green);font-size:.62rem;">▲ ${pct}%</span>`
+            : pct < 0 ? `<span style="color:var(--red);font-size:.62rem;">▼ ${Math.abs(pct)}%</span>`
+            : `<span style="color:var(--muted);font-size:.62rem;">= 0%</span>`;
+    }
+
+    const box = (label, val, color, extra) => `
+      <div style="background:rgba(255,255,255,.04);border:1px solid ${color}33;border-radius:10px;padding:10px 8px;text-align:center;">
+        <div style="font-size:1.15rem;font-weight:800;color:${color};line-height:1.2;">${n(val)}</div>
+        <div style="font-size:.63rem;color:var(--muted);margin-top:3px;">${label}</div>
+        ${extra ? '<div style="margin-top:2px;">' + extra + '</div>' : ''}
+      </div>`;
+
+    // رسم بياني لآخر 14 يوماً
+    const s = Array.isArray(d.series) ? d.series : [];
+    const mx = Math.max(1, ...s.map(x => Number(x.c || 0)));
+    const bars = s.map(x => {
+      const v = Number(x.c || 0);
+      const h = Math.max(2, Math.round((v / mx) * 40));
+      const isToday = x === s[s.length - 1];
+      return `<div title="${x.d}: ${v}" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:3px;">
+        <div style="width:100%;max-width:14px;height:${h}px;background:${isToday ? 'var(--gold)' : 'rgba(212,160,23,.4)'};border-radius:3px 3px 0 0;"></div>
+        <div style="font-size:.5rem;color:var(--muted);white-space:nowrap;">${x.d.slice(3)}</div>
+      </div>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:7px;">
+        ${box('اليوم', d.today, 'var(--gold)', trend)}
+        ${box('آخر 7 أيام', d.week, '#3498DB', '')}
+        ${box('آخر 30 يوماً', d.month, 'var(--green)', '')}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-bottom:10px;">
+        ${box('آخر سنة', d.year, '#9b59b6', '')}
+        ${box('الإجمالي منذ البداية', d.total, 'var(--text)', '')}
+      </div>
+      <div style="background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:10px;padding:10px 8px 6px;">
+        <div style="font-size:.65rem;color:var(--muted);margin-bottom:8px;">📈 آخر 14 يوماً</div>
+        <div style="display:flex;align-items:flex-end;gap:3px;height:58px;">${bars}</div>
+      </div>`;
   } catch(e) {
-    const el = document.getElementById('adminVisits');
-    if (el) el.textContent = '👁️ خطأ في تحميل الزيارات';
+    el.innerHTML = '<div style="font-size:12px;color:var(--red);padding:10px;text-align:center;">تعذّر تحميل إحصاءات الزيارات</div>';
   }
 }
 
@@ -3036,6 +3083,11 @@ function refreshProUI() {
   const accName   = document.getElementById('stAcc');
   const adminRow = document.getElementById('adminRow');
   if (adminRow) adminRow.style.display = (session && profile?.is_admin) ? 'flex' : 'none';
+  // تعليم الجهاز كجهاز مالك — لمنع احتساب زياراتك ضمن إحصاءات الموقع
+  try {
+    if (session && profile?.is_admin) localStorage.setItem('tj_owner', '1');
+    else if (session) localStorage.removeItem('tj_owner');
+  } catch(_) {}
   const passRow = document.getElementById('passRow');
   if (passRow) passRow.style.display = session ? 'flex' : 'none';
   const cxRow = document.getElementById('cxRow');
@@ -4158,11 +4210,14 @@ function finOb() { localStorage.setItem('tob','1'); showScreen('app'); nav('h');
 window.addEventListener('load', () => {
   // عداد الزيارات — بدون تسجيل دخول
   setTimeout(() => {
-    fetch(SB_URL + '/functions/v1/ai', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY },
-      body: JSON.stringify({ action: 'visit' })
-    }).catch(() => {});
+    // زيارات المالك لا تُحتسب حتى تبقى الأرقام صادقة
+    if (localStorage.getItem('tj_owner') !== '1') {
+      fetch(SB_URL + '/functions/v1/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY },
+        body: JSON.stringify({ action: 'visit' })
+      }).catch(() => {});
+    }
   }, 2000);
   setTimeout(() => { document.getElementById('sBar').style.width = '100%'; }, 80);
   setTimeout(() => {
