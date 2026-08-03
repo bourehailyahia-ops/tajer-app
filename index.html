@@ -3238,6 +3238,10 @@ function openAdModal() {
 
 
 // ========== PRO MAX BUILDERS — CHAT-BASED ==========
+// خريطة النوع إلى بادئة المعرّفات في الصفحة (website→ws · app→ap)
+const KP = { website: 'ws', app: 'ap' };
+const kid = (kind, suffix) => document.getElementById((KP[kind] || kind) + suffix);
+
 let chatState = {
   website: { messages: [], started: false },
   app:     { messages: [], started: false },
@@ -3255,11 +3259,11 @@ function initChat(kind) {
     st.messages = [{ role: 'assistant', content: CHAT_STARTER[kind] }];
   }
   renderChatMsgs(kind);
-  document.getElementById(kind + '-build-result').style.display = 'none';
+  kid(kind, '-build-result').style.display = 'none';
 }
 
 function renderChatMsgs(kind) {
-  const el = document.getElementById(kind + '-chat-msgs');
+  const el = kid(kind, '-chat-msgs');
   el.innerHTML = chatState[kind].messages.map(m => `
     <div class="chat-bubble ${m.role === 'user' ? 'user' : 'admin'}">${escapeHtml(m.content)}</div>
   `).join('');
@@ -3294,7 +3298,8 @@ setTimeout(wireChatSend, 800);
 setTimeout(wireChatSend, 2500);
 
 async function sendChatMsg(kind) {
-  const input = document.getElementById(kind + '-chat-input');
+  const input = kid(kind, '-chat-input');
+  if (!input) { showToast('⚠️ تعذّر العثور على حقل الكتابة'); return; }
   const text = input.value.trim();
   if (!text) return;
   input.value = '';
@@ -3303,8 +3308,8 @@ async function sendChatMsg(kind) {
   st.messages.push({ role: 'user', content: text });
   renderChatMsgs(kind);
 
-  const typing = document.getElementById(kind + '-chat-typing');
-  const errEl  = document.getElementById(kind + '-chat-err');
+  const typing = kid(kind, '-chat-typing');
+  const errEl  = kid(kind, '-chat-err');
   typing.style.display = 'block'; errEl.style.display = 'none';
 
   try {
@@ -3321,6 +3326,9 @@ async function sendChatMsg(kind) {
 }
 
 // يلتقط أي خطأ صامت ويعرضه بدل أن يبدو الزر معطّلاً
+window.addEventListener('unhandledrejection', (ev) => {
+  try { showToast('⚠️ ' + String(ev.reason && ev.reason.message || ev.reason || '').slice(0, 90)); } catch(_) {}
+});
 window.addEventListener('error', (ev) => {
   try {
     const scr = document.getElementById('sv-website') || document.getElementById('sv-app');
@@ -3361,9 +3369,9 @@ async function finalizeChatBuild(kind) {
   const st = chatState[kind];
   if (st.messages.filter(m => m.role === 'user').length < 1) { showToast(kind === 'website' ? M('msg_wsprompt') : M('msg_apprompt')); return; }
 
-  const btn = document.getElementById(kind + '-build-btn');
-  const errEl = document.getElementById(kind + '-chat-err');
-  const resEl = document.getElementById(kind + '-build-result');
+  const btn = kid(kind, '-build-btn');
+  const errEl = kid(kind, '-chat-err');
+  const resEl = kid(kind, '-build-result');
   btn.disabled = true; btn.textContent = '⏳ ' + (I18N[lang]?.['chat-building'] || 'جارٍ البناء...');
   errEl.style.display = 'none'; resEl.style.display = 'none';
 
@@ -3379,7 +3387,7 @@ async function finalizeChatBuild(kind) {
     const code = extractHtml(d.text);
     if (!code || code.length < 200) throw new Error('EMPTY');
     const fname = kind === 'website' ? 'mon-site.html' : 'mon-app.html';
-    deliverFile(code, kind + '-code', kind + '-dl', fname);
+    deliverFile(code, (KP[kind]||kind) + '-code', (KP[kind]||kind) + '-dl', fname);
     resEl.style.display = 'block';
     if (typeof d.builds_remaining === 'number') {
       showToast((I18N[lang]?.['builds-left'] || 'رصيد التوليدات المتبقي:') + ' ' + d.builds_remaining);
