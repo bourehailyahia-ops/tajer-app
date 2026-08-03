@@ -1004,8 +1004,8 @@ select.f-input option{background:#1A1200;}
     <div id="ws-chat-err" class="err-box" style="display:none;margin-bottom:8px;"></div>
     <button class="btn-max" id="ws-build-btn" onclick="finalizeChatBuild('website')" style="margin-bottom:8px;" data-i18n="chat-build-btn">🏗️ ابنِ الملف الآن</button>
     <div style="display:flex;gap:8px;padding-bottom:14px;flex-shrink:0;">
-      <input class="f-input" id="ws-chat-input" type="text" data-i18n-ph="chat-input-ph" placeholder="اكتب رسالتك..." style="flex:1;margin:0;" onkeydown="if(event.key==='Enter')sendChatMsg('website')">
-      <button class="btn-gold" onclick="sendChatMsg('website')" style="width:auto;padding:0 18px;margin:0;">➤</button>
+      <input class="f-input" id="ws-chat-input" type="text" enterkeyhint="send" autocomplete="off" data-i18n-ph="chat-input-ph" placeholder="اكتب رسالتك..." style="flex:1;margin:0;">
+      <button class="btn-gold" id="ws-send-btn" type="button" style="width:auto;min-width:56px;min-height:48px;padding:0 18px;margin:0;font-size:20px;">➤</button>
     </div>
     <div id="ws-build-result" style="display:none;padding-bottom:14px;">
       <div style="background:rgba(39,174,96,.1);border:1px solid rgba(39,174,96,.3);border-radius:var(--r);padding:12px;color:var(--green);font-size:.84rem;line-height:1.7;margin-bottom:10px;" data-i18n="ws-done">✅ موقعك جاهز! حمّل الملف ثم ارفعه على netlify.com/drop مجاناً.</div>
@@ -1028,8 +1028,8 @@ select.f-input option{background:#1A1200;}
     <div id="ap-chat-err" class="err-box" style="display:none;margin-bottom:8px;"></div>
     <button class="btn-max" id="ap-build-btn" onclick="finalizeChatBuild('app')" style="margin-bottom:8px;" data-i18n="chat-build-btn">🏗️ ابنِ الملف الآن</button>
     <div style="display:flex;gap:8px;padding-bottom:14px;flex-shrink:0;">
-      <input class="f-input" id="ap-chat-input" type="text" data-i18n-ph="chat-input-ph" placeholder="اكتب رسالتك..." style="flex:1;margin:0;" onkeydown="if(event.key==='Enter')sendChatMsg('app')">
-      <button class="btn-gold" onclick="sendChatMsg('app')" style="width:auto;padding:0 18px;margin:0;">➤</button>
+      <input class="f-input" id="ap-chat-input" type="text" enterkeyhint="send" autocomplete="off" data-i18n-ph="chat-input-ph" placeholder="اكتب رسالتك..." style="flex:1;margin:0;">
+      <button class="btn-gold" id="ap-send-btn" type="button" style="width:auto;min-width:56px;min-height:48px;padding:0 18px;margin:0;font-size:20px;">➤</button>
     </div>
     <div id="ap-build-result" style="display:none;padding-bottom:14px;">
       <div style="background:rgba(39,174,96,.1);border:1px solid rgba(39,174,96,.3);border-radius:var(--r);padding:12px;color:var(--green);font-size:.84rem;line-height:1.7;margin-bottom:10px;" data-i18n="ap-done">✅ تطبيقك جاهز! حمّله وارفعه على netlify.com/drop ثم حوّله لتطبيق Android عبر pwabuilder.com</div>
@@ -3270,6 +3270,29 @@ function escapeHtml(s) {
   const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
 }
 
+// ربط أزرار الإرسال برمجياً — أكثر موثوقية من onclick المضمّن على الهاتف
+function wireChatSend() {
+  [['ws','website'], ['ap','app']].forEach(([p, kind]) => {
+    const btn = document.getElementById(p + '-send-btn');
+    const inp = document.getElementById(p + '-chat-input');
+    if (btn && !btn._wired) {
+      btn._wired = true;
+      const go = (e) => { if (e) { e.preventDefault(); e.stopPropagation(); } sendChatMsg(kind); };
+      btn.addEventListener('click', go);
+      btn.addEventListener('touchend', go, { passive: false });
+    }
+    if (inp && !inp._wired) {
+      inp._wired = true;
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); sendChatMsg(kind); }
+      });
+    }
+  });
+}
+document.addEventListener('DOMContentLoaded', wireChatSend);
+setTimeout(wireChatSend, 800);
+setTimeout(wireChatSend, 2500);
+
 async function sendChatMsg(kind) {
   const input = document.getElementById(kind + '-chat-input');
   const text = input.value.trim();
@@ -3296,6 +3319,16 @@ async function sendChatMsg(kind) {
     typing.style.display = 'none';
   }
 }
+
+// يلتقط أي خطأ صامت ويعرضه بدل أن يبدو الزر معطّلاً
+window.addEventListener('error', (ev) => {
+  try {
+    const scr = document.getElementById('sv-website') || document.getElementById('sv-app');
+    if (scr && scr.classList.contains('active')) {
+      showToast('⚠️ ' + String(ev.message || 'خطأ').slice(0, 90));
+    }
+  } catch(_) {}
+});
 
 function extractHtml(text) {
   let t = String(text || '').trim();
