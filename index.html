@@ -488,6 +488,10 @@ select.f-input option{background:#1A1200;}
         <div class="plan-price"><span id="maxPrice">30$</span><span id="pm3"> /شهر</span></div>
         <div id="maxDzd" style="font-size:.82rem;color:var(--gold-l);font-weight:700;margin-bottom:2px;">≈ 7,200 دج /شهر</div>
         <div id="maxPriceNote" style="font-size:.76rem;color:var(--muted);margin-bottom:6px;display:none;" data-i18n="maxPriceNote">350$ سنوياً — أي 29.2$ شهرياً</div>
+        <div id="maxYearlyWarn" style="display:none;background:rgba(212,168,67,.1);border:1px solid rgba(212,168,67,.3);border-radius:9px;padding:9px 11px;margin-bottom:8px;font-size:.72rem;line-height:1.75;color:var(--gold-l);text-align:right;">
+          ⚠️ <b>240 توليدة للسنة كاملة</b> — وليست شهرياً.<br>
+          تستعملها متى شئت بحرية، لكن إن استهلكتها في شهر واحد يتوقف التوليد حتى تشتري رصيداً إضافياً.
+        </div>
         <ul class="plan-feats">
           <li class="yes"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg><span data-i18n="pm1">كل مزايا برو</span></li>
           <li class="yes"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M5 13l4 4L19 7"/></svg><span data-i18n="pm2f">🌐 أنشئ موقعك الإلكتروني الكامل</span></li>
@@ -1067,6 +1071,10 @@ select.f-input option{background:#1A1200;}
     </div>
 
     <!-- اختيار طريقة الدفع -->
+    <div id="payYearlyWarn" style="display:none;background:rgba(212,168,67,.1);border:1px solid rgba(212,168,67,.32);border-radius:11px;padding:11px 13px;margin-bottom:14px;font-size:.76rem;line-height:1.8;color:var(--gold-l);">
+      ⚠️ <b>تذكير قبل الدفع:</b> الـ240 توليدة مخصصة <b>للسنة كاملة</b> لا للشهر.<br>
+      لك حرية استعمالها متى شئت، لكن إن استهلكتها كلها في شهر واحد فسيتوقف التوليد حتى تشتري رصيداً إضافياً.
+    </div>
     <div class="f-label" data-i18n="py-method">اختر طريقة الدفع</div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
       <button class="pay-opt active" id="payTabDzd" onclick="setPayMethod('chargily')">
@@ -2245,6 +2253,11 @@ async function payApi(payload) {
 
 // فتح شاشة الدفع
 async function openPay(tier) {
+  // تنبيه الـ240 توليدة — لبرو ماكس السنوي فقط
+  try {
+    const w = document.getElementById('payYearlyWarn');
+    if (w) w.style.display = (payTier === 'promax' && billingCycle === 'yearly') ? 'block' : 'none';
+  } catch(_) {}
   if (!session) { openAuth(); return; }
   payTier = tier;
   showScreen('sv-pay');
@@ -3171,6 +3184,7 @@ function setBilling(cycle) {
   const mPrice = document.getElementById('maxPrice');
   const mPer   = document.getElementById('pm3');
   const mNote  = document.getElementById('maxPriceNote');
+  const mWarn  = document.getElementById('maxYearlyWarn');
   const mBtn   = document.getElementById('maxBtn');
   const mDzd   = document.getElementById('maxDzd');
   if (cycle === 'yearly') {
@@ -3184,6 +3198,7 @@ function setBilling(cycle) {
     if (mNote)  mNote.style.display = 'block';
     if (mBtn)   mBtn.textContent = t['maxBtnY'] || '👑 برو ماكس سنوياً — 350$';
     if (mDzd)   mDzd.textContent = '≈ 84,000 دج /سنة';
+    if (mWarn)  mWarn.style.display = 'block';
   } else {
     price.textContent = '12$';
     per.textContent   = t['pm2'] || ' /شهر';
@@ -3195,6 +3210,7 @@ function setBilling(cycle) {
     if (mNote)  mNote.style.display = 'none';
     if (mBtn)   mBtn.textContent = t['maxBtn'] || '👑 اشترك في برو ماكس — 30$/شهر';
     if (mDzd)   mDzd.textContent = '≈ 7,200 دج /شهر';
+    if (mWarn)  mWarn.style.display = 'none';
   }
 }
 
@@ -3456,7 +3472,16 @@ async function finalizeChatBuild(kind) {
     deliverFile(code, (KP[kind]||kind) + '-code', (KP[kind]||kind) + '-dl', fname);
     resEl.style.display = 'block';
     if (typeof d.builds_remaining === 'number') {
-      showToast((I18N[lang]?.['builds-left'] || 'رصيد التوليدات المتبقي:') + ' ' + d.builds_remaining);
+      const left = d.builds_remaining;
+      if (left <= 0) {
+        showToast('⛔ نفد رصيد التوليدات — اشترِ رصيداً إضافياً للمتابعة');
+      } else if (left <= 5) {
+        showToast('⚠️ متبقٍ ' + left + ' توليدات فقط من رصيدك');
+      } else if (left <= 20) {
+        showToast('⏳ متبقٍ ' + left + ' توليدة من رصيدك');
+      } else {
+        showToast((I18N[lang]?.['builds-left'] || 'رصيد التوليدات المتبقي:') + ' ' + left);
+      }
     }
     saveHist(kind === 'website' ? '🌐 موقع (محادثة)' : '📱 تطبيق (محادثة)', st.messages[1]?.content?.slice(0, 40) || '');
   } catch (e) {
