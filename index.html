@@ -1516,6 +1516,14 @@ function handleAiError(e, errEl) {
     setTimeout(() => { document.getElementById('maxModal').classList.add('open'); }, 300);
     return;
   }
+  if (m.startsWith('RATE_LIMITED')) {
+    if (errEl) errEl.style.display = 'none';
+    const mins = m.split('|')[1] || '60';
+    showToast('⏳ طلبات كثيرة في وقت قصير. حاول بعد ' + mins + ' دقيقة'
+      + (session ? '' : '، أو أنشئ حساباً مجانياً لحدّ أعلى'));
+    if (!session) setTimeout(() => openAuth(), 1400);
+    return;
+  }
   if (m === 'NEEDS_PRO') {
     if (errEl) errEl.style.display = 'none';
     premiumTrialUsed = true; refreshProUI();
@@ -1550,6 +1558,10 @@ async function aiCall(payload) {
     if (d.error === 'not_configured')   throw new Error('AI_NOT_CONFIGURED');
     if (d.error === 'account_banned')   throw new Error('ACCOUNT_BANNED');
     if (d.error === 'build_limit_reached') throw new Error('BUILD_LIMIT');
+    if (d.error === 'rate_limited') {
+      const mins = Math.max(1, Math.ceil((d.retry_after || 3600) / 60));
+      throw new Error('RATE_LIMITED|' + mins);
+    }
     throw new Error(d.details || d.error || r.status);
   }
   return d;
