@@ -1002,20 +1002,21 @@ select.f-input option{background:#1A1200;}
     <div id="ws-chat-msgs" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;padding-bottom:10px;"></div>
     <div id="ws-chat-typing" style="display:none;padding:6px 0;"><div class="loading"><span></span><span></span><span></span></div></div>
     <div id="ws-chat-err" class="err-box" style="display:none;margin-bottom:8px;"></div>
+    <button type="button" onclick="resetChat('website')" style="background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:9px;padding:7px 12px;font-size:12px;color:var(--muted);font-family:Cairo,sans-serif;cursor:pointer;margin-bottom:8px;align-self:flex-start;flex-shrink:0;">🔄 محادثة جديدة</button>
     <button class="btn-max" id="ws-build-btn" onclick="finalizeChatBuild('website')" style="margin-bottom:8px;" data-i18n="chat-build-btn">🏗️ ابنِ الملف الآن</button>
     <div style="display:flex;gap:8px;padding-bottom:14px;flex-shrink:0;">
       <input class="f-input" id="ws-chat-input" type="text" enterkeyhint="send" autocomplete="off" data-i18n-ph="chat-input-ph" placeholder="اكتب رسالتك..." style="flex:1;margin:0;">
       <button class="btn-gold" id="ws-send-btn" type="button" style="width:auto;min-width:56px;min-height:48px;padding:0 18px;margin:0;font-size:20px;">➤</button>
     </div>
-    <div id="ws-build-result" style="display:none;padding-bottom:14px;">
-      <div style="background:rgba(39,174,96,.1);border:1px solid rgba(39,174,96,.3);border-radius:var(--r);padding:12px;color:var(--green);font-size:.84rem;line-height:1.7;margin-bottom:10px;" data-i18n="ws-done">✅ موقعك جاهز! حمّل الملف ثم ارفعه على netlify.com/drop مجاناً.</div>
+    <div id="ws-build-result" style="display:none;padding-bottom:14px;flex-shrink:0;max-height:42vh;overflow-y:auto;">
+      <div style="display:flex;align-items:flex-start;gap:8px;background:rgba(39,174,96,.1);border:1px solid rgba(39,174,96,.3);border-radius:var(--r);padding:12px;color:var(--green);font-size:.84rem;line-height:1.7;margin-bottom:10px;"><button type="button" onclick="document.getElementById('ws-build-result').style.display='none'" style="background:rgba(255,255,255,.1);border:none;border-radius:6px;color:#fff;width:26px;height:26px;flex-shrink:0;cursor:pointer;font-size:15px;line-height:1;" title="إغلاق ومتابعة المحادثة">✕</button><span style="flex:1;min-width:0;" data-i18n="ws-done">✅ موقعك جاهز! حمّل الملف ثم ارفعه على netlify.com/drop مجاناً.</span></div>
       <div class="result-acts" style="margin-bottom:10px;">
         <a id="ws-dl" class="btn-max" style="text-decoration:none;text-align:center;" download="mon-site.html" data-i18n="ws-dl">⬇️ تحميل الموقع</a>
       </div>
       <div class="result-acts">
         <button class="btn-copy" onclick="openPreview('ws-code')" data-i18n="ws-prev">👁️ معاينة</button>
       </div>
-      <div class="code-box" id="ws-code" style="margin-top:10px;max-height:180px;"></div>
+      <div class="code-box" id="ws-code" style="display:none;"></div>
     </div>
   </div>
 </div>
@@ -1026,20 +1027,21 @@ select.f-input option{background:#1A1200;}
     <div id="ap-chat-msgs" style="flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;padding-bottom:10px;"></div>
     <div id="ap-chat-typing" style="display:none;padding:6px 0;"><div class="loading"><span></span><span></span><span></span></div></div>
     <div id="ap-chat-err" class="err-box" style="display:none;margin-bottom:8px;"></div>
+    <button type="button" onclick="resetChat('app')" style="background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:9px;padding:7px 12px;font-size:12px;color:var(--muted);font-family:Cairo,sans-serif;cursor:pointer;margin-bottom:8px;align-self:flex-start;flex-shrink:0;">🔄 محادثة جديدة</button>
     <button class="btn-max" id="ap-build-btn" onclick="finalizeChatBuild('app')" style="margin-bottom:8px;" data-i18n="chat-build-btn">🏗️ ابنِ الملف الآن</button>
     <div style="display:flex;gap:8px;padding-bottom:14px;flex-shrink:0;">
       <input class="f-input" id="ap-chat-input" type="text" enterkeyhint="send" autocomplete="off" data-i18n-ph="chat-input-ph" placeholder="اكتب رسالتك..." style="flex:1;margin:0;">
       <button class="btn-gold" id="ap-send-btn" type="button" style="width:auto;min-width:56px;min-height:48px;padding:0 18px;margin:0;font-size:20px;">➤</button>
     </div>
-    <div id="ap-build-result" style="display:none;padding-bottom:14px;">
-      <div style="background:rgba(39,174,96,.1);border:1px solid rgba(39,174,96,.3);border-radius:var(--r);padding:12px;color:var(--green);font-size:.84rem;line-height:1.7;margin-bottom:10px;" data-i18n="ap-done">✅ تطبيقك جاهز! حمّله وارفعه على netlify.com/drop ثم حوّله لتطبيق Android عبر pwabuilder.com</div>
+    <div id="ap-build-result" style="display:none;padding-bottom:14px;flex-shrink:0;max-height:42vh;overflow-y:auto;">
+      <div style="display:flex;align-items:flex-start;gap:8px;background:rgba(39,174,96,.1);border:1px solid rgba(39,174,96,.3);border-radius:var(--r);padding:12px;color:var(--green);font-size:.84rem;line-height:1.7;margin-bottom:10px;"><button type="button" onclick="document.getElementById('ap-build-result').style.display='none'" style="background:rgba(255,255,255,.1);border:none;border-radius:6px;color:#fff;width:26px;height:26px;flex-shrink:0;cursor:pointer;font-size:15px;line-height:1;" title="إغلاق ومتابعة المحادثة">✕</button><span style="flex:1;min-width:0;" data-i18n="ap-done">✅ تطبيقك جاهز! حمّله وارفعه على netlify.com/drop ثم حوّله لتطبيق Android عبر pwabuilder.com</span></div>
       <div class="result-acts" style="margin-bottom:10px;">
         <a id="ap-dl" class="btn-max" style="text-decoration:none;text-align:center;" download="mon-app.html" data-i18n="ap-dl">⬇️ تحميل التطبيق</a>
       </div>
       <div class="result-acts">
         <button class="btn-copy" onclick="openPreview('ap-code')" data-i18n="ap-prev">👁️ معاينة</button>
       </div>
-      <div class="code-box" id="ap-code" style="margin-top:10px;max-height:180px;"></div>
+      <div class="code-box" id="ap-code" style="display:none;"></div>
     </div>
   </div>
 </div>
@@ -2185,6 +2187,9 @@ async function loadProfile() {
 }
 
 function doLogout() {
+  // مسح محادثات البناء من الذاكرة — محفوظة على الخادم وتُسترجع عند الدخول
+  chatState = { website: { messages: [], started: false }, app: { messages: [], started: false } };
+  _bcLoaded = false;
   session = null; profile = null;
   localStorage.removeItem('tajer_session');
   localStorage.removeItem('tajer_profile');
@@ -3252,7 +3257,66 @@ const CHAT_STARTER = {
   app:     'مرحباً! 👋 أخبرني عن التطبيق الذي تريد بناءه — ما اسمه؟ وماذا يفعل؟',
 };
 
+// ===== حفظ محادثات البناء على الخادم =====
+const BC_URL = SB_URL + '/functions/v1/build-chats';
+
+async function bcApi(payload) {
+  if (!session?.access_token) return null;
+  try {
+    const r = await fetch(BC_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + session.access_token,
+      },
+      body: JSON.stringify(payload),
+    });
+    return await r.json();
+  } catch (_) { return null; }
+}
+
+// حفظ مؤجّل حتى لا نرهق الخادم مع كل حرف
+const _bcTimers = {};
+function saveChatSoon(kind) {
+  if (!session?.access_token) return;
+  clearTimeout(_bcTimers[kind]);
+  _bcTimers[kind] = setTimeout(() => {
+    bcApi({ action: 'save', kind, messages: chatState[kind].messages });
+  }, 1200);
+}
+
+// استرجاع المحادثات المحفوظة بعد تسجيل الدخول
+let _bcLoaded = false;
+async function loadSavedChats(force) {
+  if (!session?.access_token) return;
+  if (_bcLoaded && !force) return;
+  _bcLoaded = true;
+  const d = await bcApi({ action: 'load' });
+  if (!d?.chats) return;
+  ['website', 'app'].forEach((k) => {
+    const saved = d.chats[k];
+    if (saved && Array.isArray(saved.messages) && saved.messages.length) {
+      chatState[k].messages = saved.messages;
+      chatState[k].started = true;
+      const box = kid(k, '-chat-msgs');
+      if (box) renderChatMsgs(k);
+    }
+  });
+}
+
+// بدء محادثة جديدة ومسح المحفوظة
+function resetChat(kind) {
+  if (!confirm('بدء محادثة جديدة؟ ستُمسح المحادثة الحالية.')) return;
+  chatState[kind] = { messages: [{ role: 'assistant', content: CHAT_STARTER[kind] }], started: true };
+  renderChatMsgs(kind);
+  const res = kid(kind, '-build-result');
+  if (res) res.style.display = 'none';
+  bcApi({ action: 'clear', kind });
+}
+
 function initChat(kind) {
+  loadSavedChats();          // يسترجع المحادثة المحفوظة إن وُجدت
   const st = chatState[kind];
   if (!st.started) {
     st.started = true;
@@ -3307,6 +3371,7 @@ async function sendChatMsg(kind) {
   const st = chatState[kind];
   st.messages.push({ role: 'user', content: text });
   renderChatMsgs(kind);
+  saveChatSoon(kind);
 
   const typing = kid(kind, '-chat-typing');
   const errEl  = kid(kind, '-chat-err');
@@ -3318,6 +3383,7 @@ async function sendChatMsg(kind) {
     refreshProUI();
     st.messages.push({ role: 'assistant', content: d.reply });
     renderChatMsgs(kind);
+    saveChatSoon(kind);
   } catch (e) {
     handleAiError(e, errEl);
   } finally {
