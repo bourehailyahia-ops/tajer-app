@@ -4547,17 +4547,41 @@ document.getElementById('maxModal').addEventListener('click', e => {
   if (e.target === document.getElementById('maxModal')) closeMaxModal();
 });
 
-// ===== تسجيل Service Worker مع تحديث تلقائي =====
+// ===== تنظيف Service Worker القديم =====
+// النسخة القديمة كانت تخزّن index.html للأبد وتعرض إصداراً قديماً.
+// نلغيها ونمسح ذاكرتها، ثم نسجّل الجديدة إن توفّرت.
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', async () => {
     try {
-      const reg = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
+      // 1) امسح كل الذاكرات القديمة
+      if (window.caches) {
+        const keys = await caches.keys();
+        await Promise.all(
+          keys.filter((k) => k.indexOf('tajer-v3') === -1).map((k) => caches.delete(k))
+        );
+      }
 
-      // ابحث عن تحديث فوراً وكل 30 دقيقة
+      // 2) هل ملف sw.js محدَّث؟
+      let fresh = false;
+      try {
+        const res = await fetch('/sw.js?probe=' + Date.now(), { cache: 'no-store' });
+        const txt = await res.text();
+        fresh = txt.indexOf('v3-2026-08-04') !== -1;
+      } catch (_) {}
+
+      const regs = await navigator.serviceWorker.getRegistrations();
+
+      if (!fresh) {
+        // النسخة القديمة ما زالت على الخادم — ألغِ التسجيل نهائياً
+        await Promise.all(regs.map((r) => r.unregister()));
+        return;
+      }
+
+      // 3) النسخة الجديدة متوفرة — سجّلها مع تحديث تلقائي
+      const reg = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
       reg.update().catch(() => {});
       setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
 
-      // إن وُجدت نسخة جديدة، فعّلها فوراً
       reg.addEventListener('updatefound', () => {
         const nw = reg.installing;
         if (!nw) return;
@@ -4568,7 +4592,6 @@ if ('serviceWorker' in navigator) {
         });
       });
 
-      // أعد التحميل مرة واحدة بعد تفعيل النسخة الجديدة
       let reloaded = false;
       navigator.serviceWorker.addEventListener('controllerchange', () => {
         if (reloaded) return;
