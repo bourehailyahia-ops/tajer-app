@@ -268,6 +268,8 @@ select.f-input option{background:#1A1200;}
 .tag-row{display:flex;flex-wrap:wrap;gap:7px;margin-top:10px;}
 .kw-tag{background:var(--gold-dim);color:var(--gold);font-size:.76rem;font-weight:700;padding:4px 11px;border-radius:999px;}
 .seo-h1{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;}
+.in-android-app .hide-in-app{display:none!important;}
+.in-android-app .show-in-app{display:flex!important;}
 </style>
 <script type="application/ld+json">
 {
@@ -517,6 +519,7 @@ select.f-input option{background:#1A1200;}
       <div class="prof-email" id="pfEmail" data-i18n="pfEmail">المستخدم المجاني</div>
       <div class="set-item" id="authRow" onclick="openAuth()" style="cursor:pointer;"><div class="set-l"><div class="set-icon">🔐</div><div><div class="set-name" id="stAcc" data-i18n="stAcc">حساب تاجر</div><div class="set-sub" id="stAccSub" data-i18n="stAccSub">سجّل الدخول لحفظ اشتراكك</div></div></div><div class="chev"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></div></div>
       <div class="set-item"><div class="set-l"><div class="set-icon">⚡</div><div><div class="set-name" id="stPlan" data-i18n="stPlan">الخطة الحالية</div><div class="set-sub" id="stPV" data-i18n="stPV">مجاني</div><div class="set-sub" id="stDays" style="display:none;font-weight:700;margin-top:2px;"></div></div></div></div>
+      <div class="set-item show-in-app" onclick="restorePlayPurchases()" style="cursor:pointer;display:none;"><div class="set-l"><div class="set-icon">♻️</div><div><div class="set-name">استعادة الاشتراك</div><div class="set-sub">إن سبق أن اشتركت من هذا الحساب</div></div></div></div>
       <div class="set-item" onclick="nav('pr')" style="cursor:pointer;"><div class="set-l"><div class="set-icon">💎</div><div><div class="set-name" id="stUp" data-i18n="stUp">ترقية للبرو</div><div class="set-sub">12$/شهر</div></div></div><div class="chev"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></div></div>
       <div class="set-item" id="passRow" onclick="openChangePass()" style="cursor:pointer;display:none;"><div class="set-l"><div class="set-icon">🔑</div><div><div class="set-name" data-i18n="stPass">تغيير كلمة السر</div><div class="set-sub" data-i18n="stPassSub">داخل التطبيق بلا بريد</div></div></div><div class="chev"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></div></div>
       <div class="set-item" id="cxRow" onclick="goComplaintForm()" style="cursor:pointer;display:none;"><div class="set-l"><div class="set-icon">📋</div><div><div class="set-name" data-i18n="stComplaint">شكوى أو مشكلة</div><div class="set-sub" data-i18n="stComplaintSub">فريقنا يراجعها ويردّ عليك</div></div></div><div class="chev"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></div></div>
@@ -1485,6 +1488,121 @@ select.f-input option{background:#1A1200;}
 </div>
 
 <script>
+
+// ===== وضع تطبيق أندرويد: إخفاء الشراء داخل التطبيق (سياسة جوجل بلاي) =====
+function isAndroidApp() {
+  try {
+    if (document.referrer && document.referrer.startsWith('android-app://')) return true;
+    if (new URLSearchParams(location.search).get('mode') === 'twa') return true;
+    if (localStorage.getItem('tj_twa') === '1') return true;
+  } catch(_) {}
+  return false;
+}
+
+(function applyAppMode() {
+  if (!isAndroidApp()) return;
+  try { localStorage.setItem('tj_twa', '1'); } catch(_) {}
+  document.documentElement.classList.add('in-android-app');
+  document.body && document.body.classList.add('in-android-app');
+  document.addEventListener('DOMContentLoaded', () => {
+    document.body.classList.add('in-android-app');
+    // منع فتح شاشة الاشتراك من أي مسار
+    if (typeof window.openPay === 'function') {
+      window.openPay = function (tier) {
+        const t = tier || payTier || 'pro';
+        const cyc = (typeof billingCycle !== 'undefined' && billingCycle === 'yearly') ? 'yearly' : 'monthly';
+        buyViaPlay(t === 'promax' ? 'promax' : 'pro', cyc);
+      };
+    }
+  });
+})();
+
+
+// ===== فوترة جوجل بلاي داخل التطبيق =====
+const PLAY_PRODUCTS = {
+  pro:    { monthly: 'pro_monthly',    yearly: 'pro_yearly' },
+  promax: { monthly: 'promax_monthly', yearly: 'promax_yearly' },
+};
+
+async function playServiceReady() {
+  if (!('getDigitalGoodsService' in window)) return null;
+  try { return await window.getDigitalGoodsService('https://play.google.com/billing'); }
+  catch (_) { return null; }
+}
+
+// الشراء عبر جوجل بلاي ثم التحقق على الخادم
+async function buyViaPlay(tier, cycle) {
+  if (!session?.access_token) { showToast('سجّل دخولك أولاً'); openAuth(); return; }
+
+  const productId = PLAY_PRODUCTS[tier]?.[cycle];
+  if (!productId) { showToast('منتج غير معروف'); return; }
+
+  const svc = await playServiceReady();
+  if (!svc) { showToast('الشراء داخل التطبيق غير متاح هنا'); return; }
+
+  try {
+    showToast('⏳ جارٍ فتح نافذة الدفع...');
+    const details = await svc.getDetails([productId]);
+    if (!details || !details.length) { showToast('المنتج غير متوفر في المتجر'); return; }
+
+    const req = new PaymentRequest(
+      [{ supportedMethods: 'https://play.google.com/billing', data: { sku: productId } }],
+      { total: { label: 'Total', amount: { currency: details[0].price.currency, value: details[0].price.value } } }
+    );
+    const resp = await req.show();
+    const token = resp.details?.purchaseToken;
+    if (!token) { await resp.complete('fail'); showToast('لم تكتمل عملية الشراء'); return; }
+
+    showToast('⏳ جارٍ تفعيل اشتراكك...');
+    const r = await fetch(SB_URL + '/functions/v1/play-billing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + session.access_token },
+      body: JSON.stringify({ action: 'verify', purchase_token: token, product_id: productId }),
+    });
+    const d = await r.json();
+
+    if (d.ok) {
+      await resp.complete('success');
+      showToast('✅ تم تفعيل اشتراكك — أهلاً بك!');
+      await loadProfile();
+      refreshProUI();
+      nav('h');
+    } else {
+      await resp.complete('fail');
+      showToast('⚠️ ' + (d.reason || 'تعذّر التفعيل — تواصل معنا'));
+    }
+  } catch (e) {
+    const m = String(e && e.message || e);
+    if (!/cancel|abort/i.test(m)) showToast('⚠️ ' + m.slice(0, 90));
+  }
+}
+
+// استعادة اشتراك سابق (تغيير الهاتف أو إعادة التثبيت)
+async function restorePlayPurchases() {
+  const svc = await playServiceReady();
+  if (!svc) { showToast('غير متاح خارج التطبيق'); return; }
+  if (!session?.access_token) { showToast('سجّل دخولك أولاً'); openAuth(); return; }
+  try {
+    showToast('⏳ جارٍ البحث عن اشتراكاتك...');
+    const list = await svc.listPurchases();
+    if (!list || !list.length) { showToast('لم نجد اشتراكاً سابقاً'); return; }
+    let ok = 0;
+    for (const p of list) {
+      const r = await fetch(SB_URL + '/functions/v1/play-billing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY,
+          'Authorization': 'Bearer ' + session.access_token },
+        body: JSON.stringify({ action: 'verify', purchase_token: p.purchaseToken, product_id: p.itemId }),
+      });
+      const d = await r.json();
+      if (d.ok) ok++;
+    }
+    if (ok) { showToast('✅ تمت استعادة اشتراكك'); await loadProfile(); refreshProUI(); }
+    else showToast('لم نجد اشتراكاً نشطاً');
+  } catch (e) { showToast('تعذّرت الاستعادة'); }
+}
+
 // ========== STATE ==========
 const SB_URL  = 'https://rnaqsvmtszxgbvzaagzx.supabase.co';
 const SB_KEY  = 'sb_publishable_ly90vH9XsCT_05kxQenomw_LE5aCud-';
@@ -4429,7 +4547,37 @@ document.getElementById('maxModal').addEventListener('click', e => {
   if (e.target === document.getElementById('maxModal')) closeMaxModal();
 });
 
-if ('serviceWorker' in navigator) { window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js').catch(() => {})); }
+// ===== تسجيل Service Worker مع تحديث تلقائي =====
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', async () => {
+    try {
+      const reg = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
+
+      // ابحث عن تحديث فوراً وكل 30 دقيقة
+      reg.update().catch(() => {});
+      setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
+
+      // إن وُجدت نسخة جديدة، فعّلها فوراً
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            nw.postMessage('SKIP_WAITING');
+          }
+        });
+      });
+
+      // أعد التحميل مرة واحدة بعد تفعيل النسخة الجديدة
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloaded) return;
+        reloaded = true;
+        location.reload();
+      });
+    } catch (_) {}
+  });
+}
 </script>
 </body>
 </html>
