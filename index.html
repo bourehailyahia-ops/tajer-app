@@ -1683,7 +1683,6 @@ async function restorePlayPurchases() {
 
 
 // ===================== المتجر الرقمي =====================
-const DP_URL = SB_URL + '/functions/v1/digital-products';
 let shopProducts = [], shopCurrent = null;
 
 async function dpApi(payload, needAuth) {
@@ -1693,7 +1692,7 @@ async function dpApi(payload, needAuth) {
     h['Authorization'] = 'Bearer ' + session.access_token;
   }
   try {
-    const r = await fetch(DP_URL, { method: 'POST', headers: h, body: JSON.stringify(payload) });
+    const r = await fetch(SB_URL + '/functions/v1/digital-products', { method: 'POST', headers: h, body: JSON.stringify(payload) });
     return await r.json();
   } catch (_) { return null; }
 }
