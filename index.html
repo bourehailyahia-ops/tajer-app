@@ -1492,16 +1492,40 @@ select.f-input option{background:#1A1200;}
 // ===== وضع تطبيق أندرويد: إخفاء الشراء داخل التطبيق (سياسة جوجل بلاي) =====
 function isAndroidApp() {
   try {
-    if (document.referrer && document.referrer.startsWith('android-app://')) return true;
-    if (new URLSearchParams(location.search).get('mode') === 'twa') return true;
-    if (localStorage.getItem('tj_twa') === '1') return true;
-  } catch(_) {}
+    // نتجاهل المفتاح القديم — كان يُضبط بالخطأ من متصفح كروم
+    try { localStorage.removeItem('tj_twa'); } catch (_) {}
+
+    const ref = document.referrer || '';
+    if (ref.startsWith('android-app://')) {
+      const pkg = ref.slice(14).split('/')[0].toLowerCase();
+      // حزم المتصفحات ليست تطبيقنا — تطبيق الويب المثبّت يمرّ عبرها
+      const browsers = [
+        'com.android.chrome', 'com.chrome', 'org.mozilla', 'com.opera',
+        'com.brave', 'com.microsoft.emmx', 'com.sec.android.app.sbrowser',
+        'com.duckduckgo', 'com.kiwibrowser', 'com.vivaldi', 'com.UCMobile',
+        'com.google.android.googlequicksearchbox',
+      ];
+      const isBrowser = browsers.some((b) => pkg.startsWith(b.toLowerCase()));
+      if (!isBrowser && pkg) {
+        try { localStorage.setItem('tj_twa2', '1'); } catch (_) {}
+        return true;
+      }
+    }
+
+    if (new URLSearchParams(location.search).get('mode') === 'twa') {
+      try { localStorage.setItem('tj_twa2', '1'); } catch (_) {}
+      return true;
+    }
+
+    return localStorage.getItem('tj_twa2') === '1';
+  } catch (_) {}
   return false;
 }
 
+
 (function applyAppMode() {
   if (!isAndroidApp()) return;
-  try { localStorage.setItem('tj_twa', '1'); } catch(_) {}
+  try { localStorage.setItem('tj_twa2', '1'); } catch(_) {}
   document.documentElement.classList.add('in-android-app');
   document.body && document.body.classList.add('in-android-app');
   document.addEventListener('DOMContentLoaded', () => {
