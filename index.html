@@ -1711,7 +1711,16 @@ async function loadShop() {
             ${p.subtitle ? `<div style="font-size:.76rem;color:var(--muted);margin-top:2px;">${esc(p.subtitle)}</div>` : ''}
           </div>
         </div>
+        ${(p.format || p.pages) ? `<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+          ${p.format ? `<span style="font-size:.66rem;background:rgba(255,255,255,.07);border:1px solid var(--line);padding:3px 9px;border-radius:20px;color:var(--muted);">📄 ${esc(p.format)}</span>` : ''}
+          ${p.pages ? `<span style="font-size:.66rem;background:rgba(255,255,255,.07);border:1px solid var(--line);padding:3px 9px;border-radius:20px;color:var(--muted);">${esc(p.pages)}</span>` : ''}
+        </div>` : ''}
         ${p.description ? `<div style="font-size:.8rem;color:var(--muted);line-height:1.8;margin-top:9px;white-space:pre-line;">${esc(p.description)}</div>` : ''}
+        ${p.contents ? `<div style="background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:10px;">
+          <div style="font-size:.72rem;color:var(--gold);font-weight:600;margin-bottom:6px;">ماذا يحتوي</div>
+          ${String(p.contents).split('\n').filter(x=>x.trim()).map(x=>`<div style="font-size:.76rem;color:var(--muted);line-height:1.9;">✓ ${esc(x.trim())}</div>`).join('')}
+        </div>` : ''}
+        ${p.preview_url ? `<a href="${esc(p.preview_url)}" target="_blank" rel="noopener" style="display:block;text-align:center;background:rgba(52,152,219,.12);border:1px solid rgba(52,152,219,.3);border-radius:10px;padding:9px;margin-top:10px;font-size:.79rem;font-weight:600;color:#5dade2;text-decoration:none;">👁️ عاين عيّنة مجاناً</a>` : ''}
         <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;">
           <div>
             <div style="font-size:1.05rem;font-weight:800;color:var(--gold);">${Number(p.price_dzd).toLocaleString('ar-DZ')} دج</div>
@@ -1886,7 +1895,15 @@ function editProduct(p) {
         <div style="flex:1;"><div class="f-label">السعر بالدينار</div><input class="f-input" id="dpDzd" type="number" value="${e.price_dzd}"></div>
         <div style="flex:1;"><div class="f-label">بالدولار</div><input class="f-input" id="dpUsd" type="number" step="0.5" value="${e.price_usd}"></div>
       </div>
-      <div class="f-label">رابط الملف (يُكشف بعد الدفع فقط)</div>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;"><div class="f-label">الصيغة</div><input class="f-input" id="dpFormat" value="${esc(e.format || '')}" placeholder="PDF"></div>
+        <div style="flex:1;"><div class="f-label">الحجم</div><input class="f-input" id="dpPages" value="${esc(e.pages || '')}" placeholder="80 صفحة"></div>
+      </div>
+      <div class="f-label">المحتويات (بند في كل سطر)</div>
+      <textarea class="f-input" id="dpContents" rows="4" placeholder="حاسبة الربح الصافي&#10;متابعة الطلبات&#10;تقرير شهري">${esc(e.contents || '')}</textarea>
+      <div class="f-label">رابط المعاينة المجانية (عيّنة يراها قبل الشراء)</div>
+      <input class="f-input" id="dpPreview" value="${esc(e.preview_url || '')}" placeholder="https://drive.google.com/... (عيّنة)">
+      <div class="f-label">رابط الملف الكامل (يُكشف بعد الدفع فقط)</div>
       <input class="f-input" id="dpFile" value="${esc(e.file_url || '')}" placeholder="https://drive.google.com/...">
       <label style="display:flex;align-items:center;gap:8px;margin:12px 0;font-size:.84rem;cursor:pointer;">
         <input type="checkbox" id="dpActive" ${e.active !== false ? 'checked' : ''} style="width:18px;height:18px;">
@@ -1907,6 +1924,10 @@ async function saveProduct() {
     price_dzd: Number(document.getElementById('dpDzd').value),
     price_usd: Number(document.getElementById('dpUsd').value),
     file_url: document.getElementById('dpFile').value.trim(),
+    preview_url: document.getElementById('dpPreview').value.trim(),
+    contents: document.getElementById('dpContents').value.trim(),
+    format: document.getElementById('dpFormat').value.trim(),
+    pages: document.getElementById('dpPages').value.trim(),
     active: document.getElementById('dpActive').checked,
   };
   if (!p.title) { showToast('العنوان مطلوب'); return; }
