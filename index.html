@@ -383,6 +383,14 @@ select.f-input option{background:#1A1200;}
           <h1 class="seo-h1">تاجر — أدوات التجارة الإلكترونية بالذكاء الاصطناعي للمتاجر العربية</h1>
           <h2 id="wH" data-i18n="wH">مرحباً، تاجر 👋</h2>
           <p id="wP" data-i18n="wP">ماذا تريد أن تنجز اليوم؟</p>
+          <a href="javascript:void(0)" onclick="showScreen('sv-shop');loadShop();" style="display:flex;align-items:center;gap:10px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.22);border-radius:12px;padding:11px 14px;margin-top:10px;text-decoration:none;">
+            <span style="font-size:19px;">🛒</span>
+            <span style="flex:1;min-width:0;">
+              <span style="display:block;font-size:13.5px;font-weight:600;color:var(--gold-l,#e8c067);">المنتجات الرقمية</span>
+              <span style="display:block;font-size:11.5px;color:var(--muted,#8095b0);margin-top:1px;">أدلة وقوالب وملفات جاهزة</span>
+            </span>
+            <span style="color:var(--muted,#8095b0);font-size:13px;">←</span>
+          </a>
           <a href="guides.html" style="display:flex;align-items:center;gap:10px;background:rgba(201,168,76,.08);border:1px solid rgba(201,168,76,.22);border-radius:12px;padding:11px 14px;margin-top:14px;text-decoration:none;">
             <span style="font-size:19px;">📚</span>
             <span style="flex:1;min-width:0;">
@@ -1205,6 +1213,45 @@ select.f-input option{background:#1A1200;}
 </div>
 
 <!-- ADMIN SCREEN -->
+
+<div class="screen" id="sv-shop">
+  <div class="hdr">
+    <button class="back-btn" onclick="back()"><svg viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button>
+    <div class="hdr-info"><h3>🛒 المنتجات الرقمية</h3></div>
+    <button onclick="loadShop()" style="background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:7px 12px;font-size:.76rem;color:var(--text);margin-inline-start:auto;">🔄</button>
+  </div>
+  <div class="svc-body">
+    <div style="position:relative;margin-bottom:12px;">
+      <input class="f-input" id="shopSearch" type="text" placeholder="🔍 عمّا تبحث؟ اكتب كلمة..." style="margin:0;" oninput="filterShop()">
+    </div>
+    <div id="shopLoad" style="text-align:center;padding:24px;color:var(--muted);font-size:.84rem;">⏳ جارٍ التحميل...</div>
+    <div id="shopList"></div>
+
+    <div id="shopAsk" style="background:linear-gradient(135deg,rgba(201,168,76,.1),rgba(201,168,76,.03));border:1px solid rgba(201,168,76,.28);border-radius:var(--r);padding:15px;margin-top:16px;">
+      <div style="font-size:.92rem;font-weight:700;color:var(--gold);margin-bottom:5px;">لم تجد ما تبحث عنه؟</div>
+      <div style="font-size:.79rem;color:var(--muted);line-height:1.8;margin-bottom:11px;">أخبرنا ما تحتاجه ونوفّره لك. نقرأ كل طلب، ونبني ما يتكرر طلبه.</div>
+      <textarea class="f-input" id="askText" rows="3" placeholder="مثال: أريد ملف إكسل لحساب أرباح الدروبشيبينغ مع نسبة الرفض" style="margin:0 0 9px;"></textarea>
+      <button class="btn-gold" onclick="sendProductRequest()">📩 أرسل طلبك</button>
+      <div id="askResult" style="margin-top:9px;"></div>
+    </div>
+
+    <div id="shopMine" style="margin-top:18px;"></div>
+  </div>
+</div>
+
+<div class="screen" id="sv-shop-pay">
+  <div class="hdr">
+    <button class="back-btn" onclick="showScreen('sv-shop')"><svg viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button>
+    <div class="hdr-info"><h3>إتمام الشراء</h3></div>
+  </div>
+  <div class="svc-body">
+    <div id="shopPayInfo"></div>
+    <div class="f-label" style="margin-top:8px;">اختر طريقة الدفع</div>
+    <div id="shopPayMethods"></div>
+    <div id="shopPayResult" style="margin-top:14px;"></div>
+  </div>
+</div>
+
 <div class="screen" id="sv-admin">
   <div class="hdr">
     <button class="back-btn" onclick="back()"><svg viewBox="0 0 24 24"><path d="M19 12H5M12 19l-7-7 7-7"/></svg></button>
@@ -1217,10 +1264,17 @@ select.f-input option{background:#1A1200;}
       <button class="bill-btn active" id="adminTabOrders" onclick="setAdminTab('orders')">💳 <span data-i18n="adm-tab1">طلبات الدفع</span></button>
       <button class="bill-btn" id="adminTabUsers" onclick="setAdminTab('users')">👥 <span data-i18n="adm-tab2">المستخدمون</span></button>
       <button class="bill-btn" id="adminTabComplaints" onclick="setAdminTab('complaints')">📋 <span data-i18n="adm-tab-cx">شكاوى التجار</span></button>
+      <button class="bill-btn" id="adminTabShop" onclick="setAdminTab('shop')">🛒 المنتجات</button>
     </div>
 
     <!-- ===== شكاوى التجار ===== -->
-    <div id="adminPaneComplaints" style="display:none;">
+    <div id="adminPaneShop" style="display:none;">
+        <button class="btn-gold" style="margin-bottom:12px;" onclick="editProduct(null)">➕ منتج جديد</button>
+        <div id="shopAdminList"></div>
+        <div class="f-label" style="margin-top:18px;">📩 طلبات الزبائن</div>
+        <div id="reqAdminList"></div>
+      </div>
+      <div id="adminPaneComplaints" style="display:none;">
       <div id="cxAdminLoad" style="display:none;"><div class="loading"><span></span><span></span><span></span></div></div>
       <div id="cxAdminList"></div>
     </div>
@@ -1625,6 +1679,349 @@ async function restorePlayPurchases() {
     if (ok) { showToast('✅ تمت استعادة اشتراكك'); await loadProfile(); refreshProUI(); }
     else showToast('لم نجد اشتراكاً نشطاً');
   } catch (e) { showToast('تعذّرت الاستعادة'); }
+}
+
+
+// ===================== المتجر الرقمي =====================
+const DP_URL = SB_URL + '/functions/v1/digital-products';
+let shopProducts = [], shopCurrent = null;
+
+async function dpApi(payload, needAuth) {
+  const h = { 'Content-Type': 'application/json', 'apikey': SB_KEY };
+  if (needAuth) {
+    if (!session?.access_token) { showToast('سجّل دخولك أولاً'); openAuth(); return null; }
+    h['Authorization'] = 'Bearer ' + session.access_token;
+  }
+  try {
+    const r = await fetch(DP_URL, { method: 'POST', headers: h, body: JSON.stringify(payload) });
+    return await r.json();
+  } catch (_) { return null; }
+}
+
+async function loadShop() {
+  const load = document.getElementById('shopLoad');
+  const list = document.getElementById('shopList');
+  if (!list) return;
+  load.style.display = 'block'; list.innerHTML = '';
+  const d = await dpApi({ action: 'list' }, false);
+  load.style.display = 'none';
+
+  shopProducts = d?.products || [];
+  if (!shopProducts.length) {
+    list.innerHTML = '<div style="text-align:center;padding:26px;color:var(--muted);font-size:.84rem;">لا توجد منتجات بعد</div>';
+  } else {
+    list.innerHTML = shopProducts.map(p => `
+      <div data-sp="${esc(p.title)} ${esc(p.subtitle||'')} ${esc(p.description||'')}" style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:10px;">
+        <div style="display:flex;gap:11px;align-items:flex-start;">
+          <span style="font-size:28px;flex-shrink:0;">${p.icon || '📘'}</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:.94rem;font-weight:700;color:var(--text);">${esc(p.title)}</div>
+            ${p.subtitle ? `<div style="font-size:.76rem;color:var(--muted);margin-top:2px;">${esc(p.subtitle)}</div>` : ''}
+          </div>
+        </div>
+        ${p.description ? `<div style="font-size:.8rem;color:var(--muted);line-height:1.8;margin-top:9px;white-space:pre-line;">${esc(p.description)}</div>` : ''}
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;">
+          <div>
+            <div style="font-size:1.05rem;font-weight:800;color:var(--gold);">${Number(p.price_dzd).toLocaleString('ar-DZ')} دج</div>
+            <div style="font-size:.68rem;color:var(--muted);">أو ${p.price_usd}$ دولياً</div>
+          </div>
+          <button class="btn-gold" style="width:auto;padding:10px 20px;margin:0;" onclick="openShopPay('${p.id}')">شراء</button>
+        </div>
+        ${p.sales_count > 2 ? `<div style="font-size:.68rem;color:var(--green);margin-top:7px;">✓ اشتراه ${p.sales_count} شخصاً</div>` : ''}
+      </div>`).join('');
+  }
+  const le = document.getElementById('shopList');
+  if (le && shopProducts.length) le.insertAdjacentHTML('beforeend',
+    '<div id="shopEmpty" style="display:none;text-align:center;padding:18px;color:var(--muted);font-size:.84rem;">لا نتائج — اطلبه منا أدناه 👇</div>');
+  loadMyPurchases();
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+}
+
+async function loadMyPurchases() {
+  const box = document.getElementById('shopMine');
+  if (!box) return;
+  if (!session?.access_token) { box.innerHTML = ''; return; }
+  const d = await dpApi({ action: 'my_purchases' }, true);
+  const paid = (d?.purchases || []).filter(p => p.status === 'paid');
+  if (!paid.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `
+    <div class="f-label">📥 مشترياتي</div>
+    ${paid.map(p => `
+      <div style="background:rgba(39,174,96,.08);border:1px solid rgba(39,174,96,.25);border-radius:var(--r);padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:10px;">
+        <span style="font-size:22px;">${p.icon || '📘'}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:.86rem;font-weight:600;">${esc(p.title)}</div>
+          <div style="font-size:.68rem;color:var(--muted);">${new Date(p.created_at).toLocaleDateString('ar-DZ')}</div>
+        </div>
+        ${p.file_url ? `<a href="${esc(p.file_url)}" target="_blank" rel="noopener" class="btn-gold" style="width:auto;padding:8px 15px;margin:0;font-size:.78rem;text-decoration:none;">تحميل</a>` : ''}
+      </div>`).join('')}`;
+}
+
+function openShopPay(id) {
+  if (!session?.access_token) { showToast('سجّل دخولك للشراء'); openAuth(); return; }
+  shopCurrent = shopProducts.find(p => p.id === id);
+  if (!shopCurrent) return;
+  const p = shopCurrent;
+  document.getElementById('shopPayInfo').innerHTML = `
+    <div style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;gap:11px;align-items:center;">
+      <span style="font-size:30px;">${p.icon || '📘'}</span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:.92rem;font-weight:700;">${esc(p.title)}</div>
+        <div style="font-size:1rem;font-weight:800;color:var(--gold);margin-top:3px;">${Number(p.price_dzd).toLocaleString('ar-DZ')} دج</div>
+      </div>
+    </div>`;
+  document.getElementById('shopPayMethods').innerHTML = `
+    <button class="btn-gold" style="margin-bottom:8px;" onclick="shopBuy('chargily')">💳 بطاقة ذهبية / CIB</button>
+    <button class="btn-ghost" style="margin-bottom:8px;" onclick="shopBuy('nowpay')">🌐 بطاقة دولية / عملات رقمية</button>
+    <button class="btn-ghost" onclick="shopBuy('usdt')">₮ USDT</button>`;
+  document.getElementById('shopPayResult').innerHTML = '';
+  showScreen('sv-shop-pay');
+}
+
+async function shopBuy(method) {
+  const res = document.getElementById('shopPayResult');
+  res.innerHTML = '<div style="text-align:center;padding:14px;color:var(--muted);font-size:.82rem;">⏳ جارٍ التحضير...</div>';
+  const d = await dpApi({ action: 'checkout', product_id: shopCurrent.id, method }, true);
+
+  if (!d) { res.innerHTML = '<div class="err-box">تعذّر الاتصال</div>'; return; }
+  if (d.already_owned) {
+    res.innerHTML = '<div style="background:rgba(39,174,96,.1);border:1px solid rgba(39,174,96,.3);border-radius:var(--r);padding:13px;color:var(--green);font-size:.84rem;">✓ اشتريت هذا المنتج مسبقاً — تجده في «مشترياتي»</div>';
+    return;
+  }
+  if (d.error) {
+    const msgs = { card_disabled: 'الدفع بالبطاقة غير مفعّل حالياً', intl_disabled: 'الدفع الدولي غير مفعّل حالياً' };
+    res.innerHTML = `<div class="err-box">${msgs[d.error] || 'تعذّر إنشاء الطلب'}</div>`;
+    return;
+  }
+
+  if (d.checkout_url) {
+    res.innerHTML = `<div style="text-align:center;padding:12px;color:var(--muted);font-size:.82rem;">جارٍ فتح صفحة الدفع...</div>`;
+    window.open(d.checkout_url, '_blank');
+    setTimeout(() => {
+      res.innerHTML = `<a href="${d.checkout_url}" target="_blank" rel="noopener" class="btn-gold" style="text-decoration:none;display:block;text-align:center;">افتح صفحة الدفع</a>
+        <div style="font-size:.76rem;color:var(--muted);margin-top:10px;text-align:center;line-height:1.8;">بعد إتمام الدفع، ارجع للمتجر وستجد المنتج في «مشترياتي»</div>`;
+    }, 900);
+    return;
+  }
+
+  if (d.usdt) {
+    res.innerHTML = `
+      <div style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;">
+        <div style="font-size:.8rem;color:var(--muted);margin-bottom:6px;">أرسل هذا المبلغ بالضبط (شبكة TRC20):</div>
+        <div style="font-size:1.15rem;font-weight:800;color:var(--gold);margin-bottom:10px;">${d.exact_amount} USDT</div>
+        <div style="font-size:.72rem;color:var(--muted);margin-bottom:4px;">إلى العنوان:</div>
+        <div class="code-box" style="font-size:.62rem;padding:9px;word-break:break-all;">${esc(d.address)}</div>
+        <button class="btn-copy" style="margin-top:8px;" onclick="navigator.clipboard.writeText('${esc(d.address)}');showToast('تم نسخ العنوان')">نسخ العنوان</button>
+        <button class="btn-gold" style="margin-top:10px;" onclick="shopConfirmUsdt()">✓ أرسلت — تحقّق الآن</button>
+      </div>`;
+    return;
+  }
+  res.innerHTML = '<div class="err-box">استجابة غير متوقعة</div>';
+}
+
+async function shopConfirmUsdt() {
+  const res = document.getElementById('shopPayResult');
+  showToast('⏳ جارٍ الفحص على الشبكة...');
+  const d = await dpApi({ action: 'confirm_usdt' }, true);
+  if (d?.ok) {
+    res.innerHTML = `<div style="background:rgba(39,174,96,.1);border:1px solid rgba(39,174,96,.3);border-radius:var(--r);padding:14px;color:var(--green);font-size:.86rem;text-align:center;">
+      ✅ تم تأكيد الدفع${d.file_url ? `<br><a href="${esc(d.file_url)}" target="_blank" rel="noopener" class="btn-gold" style="margin-top:10px;text-decoration:none;display:block;">تحميل المنتج</a>` : ''}</div>`;
+    loadMyPurchases();
+  } else {
+    showToast('❌ ' + (d?.reason || 'لم نجد التحويل بعد'));
+  }
+}
+
+
+// ===== إدارة المنتجات الرقمية (المالك) =====
+async function loadShopAdmin() {
+  const box = document.getElementById('shopAdminList');
+  if (!box) return;
+  box.innerHTML = '<div style="text-align:center;padding:16px;color:var(--muted);font-size:.82rem;">⏳ جارٍ التحميل...</div>';
+  const d = await dpApi({ action: 'admin_list' }, true);
+  const list = d?.products || [], rev = d?.revenue || {};
+  const total = Object.values(rev).reduce((a, r) => a + (r.dzd || 0), 0);
+  const count = Object.values(rev).reduce((a, r) => a + (r.n || 0), 0);
+
+  box.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
+      <div style="background:rgba(39,174,96,.1);border:1px solid rgba(39,174,96,.25);border-radius:10px;padding:11px;text-align:center;">
+        <div style="font-size:1.15rem;font-weight:800;color:var(--green);">${total.toLocaleString('ar-DZ')}</div>
+        <div style="font-size:.65rem;color:var(--muted);">دج إجمالي المبيعات</div>
+      </div>
+      <div style="background:rgba(212,160,23,.1);border:1px solid rgba(212,160,23,.25);border-radius:10px;padding:11px;text-align:center;">
+        <div style="font-size:1.15rem;font-weight:800;color:var(--gold);">${count}</div>
+        <div style="font-size:.65rem;color:var(--muted);">عملية بيع</div>
+      </div>
+    </div>` +
+    (list.length ? list.map(p => {
+      const r = rev[p.id] || { n: 0, dzd: 0 };
+      return `<div style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px;margin-bottom:9px;">
+        <div style="display:flex;align-items:center;gap:9px;">
+          <span style="font-size:22px;">${p.icon || '📘'}</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:.86rem;font-weight:600;">${esc(p.title)} ${p.active ? '' : '<span style="color:var(--red);font-size:.7rem;">(مخفي)</span>'}</div>
+            <div style="font-size:.72rem;color:var(--muted);">${Number(p.price_dzd).toLocaleString('ar-DZ')} دج · بيع ${r.n} مرة · ${r.dzd.toLocaleString('ar-DZ')} دج</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:7px;margin-top:9px;">
+          <button class="btn-copy" style="flex:1;font-size:.74rem;" onclick='editProduct(${JSON.stringify(p).replace(/'/g, "&#39;")})'>✏️ تعديل</button>
+          <button class="btn-copy" style="flex:1;font-size:.74rem;color:var(--red);" onclick="deleteProduct('${p.id}')">🗑️ حذف</button>
+        </div>
+      </div>`;
+    }).join('') : '<div style="text-align:center;padding:18px;color:var(--muted);font-size:.82rem;">لا توجد منتجات — أضف أولها</div>');
+}
+
+function editProduct(p) {
+  const e = p || { icon: '📘', price_dzd: 1000, price_usd: 5, active: true, sort_order: 0 };
+  const box = document.getElementById('shopAdminList');
+  box.innerHTML = `
+    <div style="background:var(--panel);border:1px solid rgba(212,160,23,.3);border-radius:var(--r);padding:14px;">
+      <div style="font-size:.9rem;font-weight:700;color:var(--gold);margin-bottom:12px;">${p ? '✏️ تعديل منتج' : '➕ منتج جديد'}</div>
+      <input type="hidden" id="dpId" value="${e.id || ''}">
+      <div class="f-label">الرمز التعبيري</div>
+      <input class="f-input" id="dpIcon" value="${esc(e.icon)}" maxlength="4">
+      <div class="f-label">العنوان *</div>
+      <input class="f-input" id="dpTitle" value="${esc(e.title || '')}" placeholder="دليل التجارة الإلكترونية في الجزائر">
+      <div class="f-label">سطر التعريف</div>
+      <input class="f-input" id="dpSub" value="${esc(e.subtitle || '')}" placeholder="80 صفحة PDF · محدّث 2026">
+      <div class="f-label">الوصف</div>
+      <textarea class="f-input" id="dpDesc" rows="4" placeholder="ما الذي سيحصل عليه المشتري؟">${esc(e.description || '')}</textarea>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;"><div class="f-label">السعر بالدينار</div><input class="f-input" id="dpDzd" type="number" value="${e.price_dzd}"></div>
+        <div style="flex:1;"><div class="f-label">بالدولار</div><input class="f-input" id="dpUsd" type="number" step="0.5" value="${e.price_usd}"></div>
+      </div>
+      <div class="f-label">رابط الملف (يُكشف بعد الدفع فقط)</div>
+      <input class="f-input" id="dpFile" value="${esc(e.file_url || '')}" placeholder="https://drive.google.com/...">
+      <label style="display:flex;align-items:center;gap:8px;margin:12px 0;font-size:.84rem;cursor:pointer;">
+        <input type="checkbox" id="dpActive" ${e.active !== false ? 'checked' : ''} style="width:18px;height:18px;">
+        <span>معروض للبيع</span>
+      </label>
+      <button class="btn-gold" onclick="saveProduct()">💾 حفظ</button>
+      <button class="btn-ghost" style="margin-top:8px;" onclick="loadShopAdmin()">إلغاء</button>
+    </div>`;
+}
+
+async function saveProduct() {
+  const p = {
+    id: document.getElementById('dpId').value || null,
+    icon: document.getElementById('dpIcon').value,
+    title: document.getElementById('dpTitle').value.trim(),
+    subtitle: document.getElementById('dpSub').value.trim(),
+    description: document.getElementById('dpDesc').value.trim(),
+    price_dzd: Number(document.getElementById('dpDzd').value),
+    price_usd: Number(document.getElementById('dpUsd').value),
+    file_url: document.getElementById('dpFile').value.trim(),
+    active: document.getElementById('dpActive').checked,
+  };
+  if (!p.title) { showToast('العنوان مطلوب'); return; }
+  const d = await dpApi({ action: 'admin_save', product: p }, true);
+  if (d?.ok) { showToast('✅ تم الحفظ'); loadShopAdmin(); }
+  else showToast('❌ تعذّر الحفظ');
+}
+
+async function deleteProduct(id) {
+  if (!confirm('حذف هذا المنتج نهائياً؟')) return;
+  const d = await dpApi({ action: 'admin_delete', id }, true);
+  if (d?.ok) { showToast('تم الحذف'); loadShopAdmin(); }
+}
+
+
+// ===== بحث في المنتجات =====
+function filterShop() {
+  const q = (document.getElementById('shopSearch')?.value || '').trim().toLowerCase();
+  const cards = document.querySelectorAll('#shopList [data-sp]');
+  let shown = 0;
+  cards.forEach(el => {
+    const hay = (el.getAttribute('data-sp') || '').toLowerCase();
+    const ok = !q || hay.includes(q);
+    el.style.display = ok ? 'block' : 'none';
+    if (ok) shown++;
+  });
+  const ask = document.getElementById('shopAsk');
+  const empty = document.getElementById('shopEmpty');
+  if (empty) empty.style.display = (q && shown === 0) ? 'block' : 'none';
+  // إن لم يجد شيئاً، نلفت نظره لصندوق الطلب
+  if (ask && q && shown === 0) ask.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ===== إرسال طلب منتج =====
+async function sendProductRequest() {
+  const ta = document.getElementById('askText');
+  const res = document.getElementById('askResult');
+  const text = (ta?.value || '').trim();
+  if (text.length < 5) { showToast('اكتب طلبك بوضوح أكثر'); return; }
+
+  res.innerHTML = '<div style="font-size:.78rem;color:var(--muted);">⏳ جارٍ الإرسال...</div>';
+  const h = { 'Content-Type': 'application/json', 'apikey': SB_KEY };
+  if (session?.access_token) h['Authorization'] = 'Bearer ' + session.access_token;
+
+  try {
+    const r = await fetch(SB_URL + '/functions/v1/product-requests', {
+      method: 'POST', headers: h,
+      body: JSON.stringify({ action: 'send', request: text }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      ta.value = '';
+      res.innerHTML = '<div style="background:rgba(39,174,96,.12);border:1px solid rgba(39,174,96,.3);border-radius:9px;padding:10px;font-size:.79rem;color:var(--green);line-height:1.75;">✅ وصلنا طلبك. سنراجعه ونخبرك إن وفّرناه.</div>';
+    } else if (d.error === 'rate_limited') {
+      res.innerHTML = '<div style="font-size:.78rem;color:var(--gold);">أرسلت طلبات كثيرة — حاول لاحقاً</div>';
+    } else {
+      res.innerHTML = '<div style="font-size:.78rem;color:var(--red);">تعذّر الإرسال — حاول مجدداً</div>';
+    }
+  } catch (_) {
+    res.innerHTML = '<div style="font-size:.78rem;color:var(--red);">تعذّر الاتصال</div>';
+  }
+}
+
+// ===== طلبات الزبائن (المالك) =====
+async function loadProductRequests() {
+  const box = document.getElementById('reqAdminList');
+  if (!box) return;
+  box.innerHTML = '<div style="text-align:center;padding:14px;color:var(--muted);font-size:.82rem;">⏳ جارٍ التحميل...</div>';
+  try {
+    const r = await fetch(SB_URL + '/functions/v1/product-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + (session?.access_token || '') },
+      body: JSON.stringify({ action: 'admin_list' }),
+    });
+    const d = await r.json();
+    const reqs = d?.requests || [], cn = d?.counts || {};
+    if (!reqs.length) {
+      box.innerHTML = '<div style="text-align:center;padding:16px;color:var(--muted);font-size:.82rem;">لا توجد طلبات بعد</div>';
+      return;
+    }
+    const stLbl = { new: '🆕 جديد', planned: '📌 مخطط', done: '✅ تم', declined: '✖️ مرفوض' };
+    const stCol = { new: 'var(--gold)', planned: '#3498DB', done: 'var(--green)', declined: 'var(--muted)' };
+    box.innerHTML =
+      `<div style="font-size:.76rem;color:var(--muted);margin-bottom:10px;">🆕 ${cn.new || 0} جديد · 📌 ${cn.planned || 0} مخطط · ✅ ${cn.done || 0} تم</div>` +
+      reqs.map(q => `
+        <div style="background:var(--panel);border:1px solid var(--line);border-inline-start:3px solid ${stCol[q.status]};border-radius:10px;padding:11px 13px;margin-bottom:8px;">
+          <div style="font-size:.85rem;line-height:1.8;color:var(--text);">${esc(q.request)}</div>
+          <div style="font-size:.66rem;color:var(--muted);margin-top:6px;">${esc(q.email || 'زائر')} · ${new Date(q.created_at).toLocaleDateString('ar-DZ')}</div>
+          <div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap;">
+            ${['new','planned','done','declined'].map(s =>
+              `<button class="btn-copy" style="font-size:.7rem;padding:5px 9px;${q.status===s?'color:'+stCol[s]+';border-color:'+stCol[s]+'55;':''}" onclick="setReqStatus('${q.id}','${s}')">${stLbl[s]}</button>`).join('')}
+          </div>
+        </div>`).join('');
+  } catch (_) {
+    box.innerHTML = '<div style="font-size:.8rem;color:var(--red);padding:10px;">تعذّر التحميل</div>';
+  }
+}
+
+async function setReqStatus(id, status) {
+  await fetch(SB_URL + '/functions/v1/product-requests', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY,
+      'Authorization': 'Bearer ' + (session?.access_token || '') },
+    body: JSON.stringify({ action: 'admin_update', id, status }),
+  });
+  loadProductRequests();
 }
 
 // ========== STATE ==========
@@ -2854,8 +3251,11 @@ function setAdminTab(tab) {
   document.getElementById('adminPaneOrders').style.display     = tab === 'orders'     ? 'block' : 'none';
   document.getElementById('adminPaneUsers').style.display      = tab === 'users'      ? 'block' : 'none';
   document.getElementById('adminPaneComplaints').style.display = tab === 'complaints' ? 'block' : 'none';
+  document.getElementById('adminPaneShop') && (document.getElementById('adminPaneShop').style.display = tab === 'shop' ? 'block' : 'none');
+  document.getElementById('adminTabShop') && document.getElementById('adminTabShop').classList.toggle('active', tab === 'shop');
   if (tab === 'orders') loadAdminOrders();
   else if (tab === 'complaints') loadAdminComplaints();
+  else if (tab === 'shop') { loadShopAdmin(); loadProductRequests(); }
   else loadUsers();
 }
 
