@@ -1726,8 +1726,12 @@ async function loadShop() {
             <div style="font-size:1.05rem;font-weight:800;color:var(--gold);">${Number(p.price_dzd).toLocaleString('ar-DZ')} دج</div>
             <div style="font-size:.68rem;color:var(--muted);">أو ${p.price_usd}$ دولياً</div>
           </div>
-          <button class="btn-gold" style="width:auto;padding:10px 20px;margin:0;" onclick="openShopPay('${p.id}')">شراء</button>
+          <div style="display:flex;gap:7px;">
+            ${p.preview_url ? `<a href="${esc(p.preview_url)}" target="_blank" rel="noopener" class="btn-copy" style="padding:10px 14px;margin:0;text-decoration:none;font-size:.78rem;white-space:nowrap;">👁️ معاينة</a>` : ''}
+            <button class="btn-gold" style="width:auto;padding:10px 20px;margin:0;" onclick="openShopPay('${p.id}')">شراء</button>
+          </div>
         </div>
+        ${(p.file_format || p.file_size) ? `<div style="font-size:.7rem;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--line);">📄 ${esc(p.file_format || '')}${p.file_format && p.file_size ? ' · ' : ''}${esc(p.file_size || '')}</div>` : ''}
         ${p.sales_count > 2 ? `<div style="font-size:.68rem;color:var(--green);margin-top:7px;">✓ اشتراه ${p.sales_count} شخصاً</div>` : ''}
       </div>`).join('');
   }
@@ -1924,6 +1928,9 @@ async function saveProduct() {
     price_dzd: Number(document.getElementById('dpDzd').value),
     price_usd: Number(document.getElementById('dpUsd').value),
     file_url: document.getElementById('dpFile').value.trim(),
+    preview_url: document.getElementById('dpPrev').value.trim(),
+    file_format: document.getElementById('dpFmt').value.trim(),
+    file_size: document.getElementById('dpSize').value.trim(),
     preview_url: document.getElementById('dpPreview').value.trim(),
     contents: document.getElementById('dpContents').value.trim(),
     format: document.getElementById('dpFormat').value.trim(),
