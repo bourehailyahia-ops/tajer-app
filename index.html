@@ -520,6 +520,7 @@ select.f-input option{background:#1A1200;}
       <div class="prof-email" id="pfEmail" data-i18n="pfEmail">المستخدم المجاني</div>
       <div class="set-item" id="authRow" onclick="openAuth()" style="cursor:pointer;"><div class="set-l"><div class="set-icon">🔐</div><div><div class="set-name" id="stAcc" data-i18n="stAcc">حساب تاجر</div><div class="set-sub" id="stAccSub" data-i18n="stAccSub">سجّل الدخول لحفظ اشتراكك</div></div></div><div class="chev"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></div></div>
       <div class="set-item"><div class="set-l"><div class="set-icon">⚡</div><div><div class="set-name" id="stPlan" data-i18n="stPlan">الخطة الحالية</div><div class="set-sub" id="stPV" data-i18n="stPV">مجاني</div><div class="set-sub" id="stDays" style="display:none;font-weight:700;margin-top:2px;"></div></div></div></div>
+      <div class="set-item" onclick="showScreen('sv-shop');loadShop();" style="cursor:pointer;"><div class="set-l"><div class="set-icon">📥</div><div><div class="set-name">مشترياتي</div><div class="set-sub">ملفاتك محفوظة دائماً — حمّلها متى شئت</div></div></div></div>
       <div class="set-item show-in-app" onclick="restorePlayPurchases()" style="cursor:pointer;display:none;"><div class="set-l"><div class="set-icon">♻️</div><div><div class="set-name">استعادة الاشتراك</div><div class="set-sub">إن سبق أن اشتركت من هذا الحساب</div></div></div></div>
       <div class="set-item" onclick="nav('pr')" style="cursor:pointer;"><div class="set-l"><div class="set-icon">💎</div><div><div class="set-name" id="stUp" data-i18n="stUp">ترقية للبرو</div><div class="set-sub">12$/شهر</div></div></div><div class="chev"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></div></div>
       <div class="set-item" id="passRow" onclick="openChangePass()" style="cursor:pointer;display:none;"><div class="set-l"><div class="set-icon">🔑</div><div><div class="set-name" data-i18n="stPass">تغيير كلمة السر</div><div class="set-sub" data-i18n="stPassSub">داخل التطبيق بلا بريد</div></div></div><div class="chev"><svg viewBox="0 0 24 24" stroke-width="2"><path d="M9 18l6-6-6-6"/></svg></div></div>
@@ -1907,7 +1908,13 @@ function editProduct(p) {
       <textarea class="f-input" id="dpContents" rows="4" placeholder="حاسبة الربح الصافي&#10;متابعة الطلبات&#10;تقرير شهري">${esc(e.contents || '')}</textarea>
       <div class="f-label">رابط المعاينة المجانية (عيّنة يراها قبل الشراء)</div>
       <input class="f-input" id="dpPreview" value="${esc(e.preview_url || '')}" placeholder="https://drive.google.com/... (عيّنة)">
-      <div class="f-label">رابط الملف الكامل (يُكشف بعد الدفع فقط)</div>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;"><div class="f-label">الصيغة</div><input class="f-input" id="dpFmt" value="${esc(e.file_format || '')}" placeholder="Excel (.xlsx)"></div>
+        <div style="flex:1;"><div class="f-label">الحجم</div><input class="f-input" id="dpSize" value="${esc(e.file_size || '')}" placeholder="50 كيلوبايت"></div>
+      </div>
+      <div class="f-label">👁️ رابط المعاينة المجانية (اختياري)</div>
+      <input class="f-input" id="dpPrev" value="${esc(e.preview_url || '')}" placeholder="رابط نسخة ناقصة أو صور">
+      <div class="f-label">🔒 رابط الملف الكامل (يُكشف بعد الدفع فقط)</div>
       <input class="f-input" id="dpFile" value="${esc(e.file_url || '')}" placeholder="https://drive.google.com/...">
       <label style="display:flex;align-items:center;gap:8px;margin:12px 0;font-size:.84rem;cursor:pointer;">
         <input type="checkbox" id="dpActive" ${e.active !== false ? 'checked' : ''} style="width:18px;height:18px;">
@@ -1919,23 +1926,24 @@ function editProduct(p) {
 }
 
 async function saveProduct() {
+  const V = (id) => (document.getElementById(id)?.value || '').trim();
   const p = {
-    id: document.getElementById('dpId').value || null,
-    icon: document.getElementById('dpIcon').value,
-    title: document.getElementById('dpTitle').value.trim(),
-    subtitle: document.getElementById('dpSub').value.trim(),
-    description: document.getElementById('dpDesc').value.trim(),
-    price_dzd: Number(document.getElementById('dpDzd').value),
-    price_usd: Number(document.getElementById('dpUsd').value),
-    file_url: document.getElementById('dpFile').value.trim(),
-    preview_url: document.getElementById('dpPrev').value.trim(),
-    file_format: document.getElementById('dpFmt').value.trim(),
-    file_size: document.getElementById('dpSize').value.trim(),
+    id: V('dpId') || null,
+    icon: V('dpIcon'),
+    title: V('dpTitle'),
+    subtitle: V('dpSub'),
+    description: V('dpDesc'),
+    price_dzd: Number(V('dpDzd')),
+    price_usd: Number(V('dpUsd')),
+    file_url: V('dpFile'),
+    preview_url: V('dpPrev'),
+    file_format: V('dpFmt'),
+    file_size: V('dpSize'),
     preview_url: document.getElementById('dpPreview').value.trim(),
     contents: document.getElementById('dpContents').value.trim(),
     format: document.getElementById('dpFormat').value.trim(),
     pages: document.getElementById('dpPages').value.trim(),
-    active: document.getElementById('dpActive').checked,
+    active: !!document.getElementById('dpActive')?.checked,
   };
   if (!p.title) { showToast('العنوان مطلوب'); return; }
   const d = await dpApi({ action: 'admin_save', product: p }, true);
