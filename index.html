@@ -1734,6 +1734,7 @@ async function loadShop() {
         </div>
         ${(p.file_format || p.file_size) ? `<div style="font-size:.7rem;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--line);">📄 ${esc(p.file_format || '')}${p.file_format && p.file_size ? ' · ' : ''}${esc(p.file_size || '')}</div>` : ''}
         ${p.sales_count > 2 ? `<div style="font-size:.68rem;color:var(--green);margin-top:7px;">✓ اشتراه ${p.sales_count} شخصاً</div>` : ''}
+        <div style="font-size:.66rem;color:var(--muted);margin-top:6px;">📥 تحميل فوري بعد الدفع · من «مشترياتي»</div>
       </div>`).join('');
   }
   const le = document.getElementById('shopList');
@@ -1781,7 +1782,11 @@ function openShopPay(id) {
     </div>`;
   document.getElementById('shopPayMethods').innerHTML = `
     <button class="btn-gold" style="margin-bottom:8px;" onclick="shopBuy('chargily')">💳 البطاقة الذهبية / CIB</button>
-    <button class="btn-ghost" onclick="shopBuy('usdt')">₮ USDT — شبكة TRC20</button>`;
+    <button class="btn-ghost" onclick="shopBuy('usdt')">₮ USDT — شبكة TRC20</button>
+    <div style="background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-top:12px;font-size:.75rem;color:var(--muted);line-height:1.85;">
+      📥 <b style="color:var(--gold-l);">بعد الدفع:</b> ارجع للمتجر وستجد الملف في «مشترياتي».<br>
+      إن تأخر ظهوره، حدّث الصفحة بعد لحظات — وإن لم يظهر، راسلنا وسنرسله لك فوراً.
+    </div>`;
   document.getElementById('shopPayResult').innerHTML = '';
   showScreen('sv-shop-pay');
 }
@@ -1807,7 +1812,10 @@ async function shopBuy(method) {
     window.open(d.checkout_url, '_blank');
     setTimeout(() => {
       res.innerHTML = `<a href="${d.checkout_url}" target="_blank" rel="noopener" class="btn-gold" style="text-decoration:none;display:block;text-align:center;">افتح صفحة الدفع</a>
-        <div style="font-size:.76rem;color:var(--muted);margin-top:10px;text-align:center;line-height:1.8;">بعد إتمام الدفع، ارجع للمتجر وستجد المنتج في «مشترياتي»</div>`;
+        <div style="font-size:.76rem;color:var(--muted);margin-top:12px;line-height:1.9;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:10px;padding:11px 13px;">
+        📥 بعد إتمام الدفع، ارجع لهذه الصفحة وستجد المنتج في «مشترياتي».<br>
+        قد يستغرق ظهوره لحظات — حدّث الصفحة إن لم تجده. وإن تأخر أكثر، راسلنا وسنرسله فوراً.
+      </div>`;
     }, 900);
     return;
   }
