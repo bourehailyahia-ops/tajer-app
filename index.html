@@ -1780,9 +1780,8 @@ function openShopPay(id) {
       </div>
     </div>`;
   document.getElementById('shopPayMethods').innerHTML = `
-    <button class="btn-gold" style="margin-bottom:8px;" onclick="shopBuy('chargily')">💳 بطاقة ذهبية / CIB</button>
-    <button class="btn-ghost" style="margin-bottom:8px;" onclick="shopBuy('nowpay')">🌐 بطاقة دولية / عملات رقمية</button>
-    <button class="btn-ghost" onclick="shopBuy('usdt')">₮ USDT</button>`;
+    <button class="btn-gold" style="margin-bottom:8px;" onclick="shopBuy('chargily')">💳 البطاقة الذهبية / CIB</button>
+    <button class="btn-ghost" onclick="shopBuy('usdt')">₮ USDT — شبكة TRC20</button>`;
   document.getElementById('shopPayResult').innerHTML = '';
   showScreen('sv-shop-pay');
 }
