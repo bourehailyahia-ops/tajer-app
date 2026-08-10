@@ -1,0 +1,3491 @@
+// ===== فوترة جوجل بلاي داخل التطبيق =====
+const PLAY_PRODUCTS = {
+  pro:    { monthly: 'pro_monthly',    yearly: 'pro_yearly' },
+  promax: { monthly: 'promax_monthly', yearly: 'promax_yearly' },
+};
+
+async function playServiceReady() {
+  if (!('getDigitalGoodsService' in window)) return null;
+  try { return await window.getDigitalGoodsService('https://play.google.com/billing'); }
+  catch (_) { return null; }
+}
+
+// الشراء عبر جوجل بلاي ثم التحقق على الخادم
+async function buyViaPlay(tier, cycle) {
+  if (!session?.access_token) { showToast('سجّل دخولك أولاً'); openAuth(); return; }
+
+  const productId = PLAY_PRODUCTS[tier]?.[cycle];
+  if (!productId) { showToast('منتج غير معروف'); return; }
+
+  const svc = await playServiceReady();
+  if (!svc) { showToast('الشراء داخل التطبيق غير متاح هنا'); return; }
+
+  try {
+    showToast('⏳ جارٍ فتح نافذة الدفع...');
+    const details = await svc.getDetails([productId]);
+    if (!details || !details.length) { showToast('المنتج غير متوفر في المتجر'); return; }
+
+    const req = new PaymentRequest(
+      [{ supportedMethods: 'https://play.google.com/billing', data: { sku: productId } }],
+      { total: { label: 'Total', amount: { currency: details[0].price.currency, value: details[0].price.value } } }
+    );
+    const resp = await req.show();
+    const token = resp.details?.purchaseToken;
+    if (!token) { await resp.complete('fail'); showToast('لم تكتمل عملية الشراء'); return; }
+
+    showToast('⏳ جارٍ تفعيل اشتراكك...');
+    const r = await fetch(SB_URL + '/functions/v1/play-billing', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + session.access_token },
+      body: JSON.stringify({ action: 'verify', purchase_token: token, product_id: productId }),
+    });
+    const d = await r.json();
+
+    if (d.ok) {
+      await resp.complete('success');
+      showToast('✅ تم تفعيل اشتراكك — أهلاً بك!');
+      await loadProfile();
+      refreshProUI();
+      nav('h');
+    } else {
+      await resp.complete('fail');
+      showToast('⚠️ ' + (d.reason || 'تعذّر التفعيل — تواصل معنا'));
+    }
+  } catch (e) {
+    const m = String(e && e.message || e);
+    if (!/cancel|abort/i.test(m)) showToast('⚠️ ' + m.slice(0, 90));
+  }
+}
+
+// استعادة اشتراك سابق (تغيير الهاتف أو إعادة التثبيت)
+async function restorePlayPurchases() {
+  const svc = await playServiceReady();
+  if (!svc) { showToast('غير متاح خارج التطبيق'); return; }
+  if (!session?.access_token) { showToast('سجّل دخولك أولاً'); openAuth(); return; }
+  try {
+    showToast('⏳ جارٍ البحث عن اشتراكاتك...');
+    const list = await svc.listPurchases();
+    if (!list || !list.length) { showToast('لم نجد اشتراكاً سابقاً'); return; }
+    let ok = 0;
+    for (const p of list) {
+      const r = await fetch(SB_URL + '/functions/v1/play-billing', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY,
+          'Authorization': 'Bearer ' + session.access_token },
+        body: JSON.stringify({ action: 'verify', purchase_token: p.purchaseToken, product_id: p.itemId }),
+      });
+      const d = await r.json();
+      if (d.ok) ok++;
+    }
+    if (ok) { showToast('✅ تمت استعادة اشتراكك'); await loadProfile(); refreshProUI(); }
+    else showToast('لم نجد اشتراكاً نشطاً');
+  } catch (e) { showToast('تعذّرت الاستعادة'); }
+}
+
+
+// ===================== المتجر الرقمي =====================
+let shopProducts = [], shopCurrent = null;
+
+async function dpApi(payload, needAuth) {
+  const h = { 'Content-Type': 'application/json', 'apikey': SB_KEY };
+  if (needAuth) {
+    if (!session?.access_token) { showToast('سجّل دخولك أولاً'); openAuth(); return null; }
+    h['Authorization'] = 'Bearer ' + session.access_token;
+  }
+  try {
+    const r = await fetch(SB_URL + '/functions/v1/digital-products', { method: 'POST', headers: h, body: JSON.stringify(payload) });
+    return await r.json();
+  } catch (_) { return null; }
+}
+
+async function loadShop() {
+  const load = document.getElementById('shopLoad');
+  const list = document.getElementById('shopList');
+  if (!list) return;
+  load.style.display = 'block'; list.innerHTML = '';
+  const d = await dpApi({ action: 'list' }, false);
+  load.style.display = 'none';
+
+  shopProducts = d?.products || [];
+  if (!shopProducts.length) {
+    list.innerHTML = '<div style="text-align:center;padding:26px;color:var(--muted);font-size:.84rem;">لا توجد منتجات بعد</div>';
+  } else {
+    list.innerHTML = shopProducts.map(p => `
+      <div data-sp="${esc(p.title)} ${esc(p.subtitle||'')} ${esc(p.description||'')}" style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;margin-bottom:10px;">
+        <div style="display:flex;gap:11px;align-items:flex-start;">
+          <span style="font-size:28px;flex-shrink:0;">${p.icon || '📘'}</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:.94rem;font-weight:700;color:var(--text);">${esc(p.title)}</div>
+            ${p.subtitle ? `<div style="font-size:.76rem;color:var(--muted);margin-top:2px;">${esc(p.subtitle)}</div>` : ''}
+          </div>
+        </div>
+        ${(p.format || p.pages) ? `<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap;">
+          ${p.format ? `<span style="font-size:.66rem;background:rgba(255,255,255,.07);border:1px solid var(--line);padding:3px 9px;border-radius:20px;color:var(--muted);">📄 ${esc(p.format)}</span>` : ''}
+          ${p.pages ? `<span style="font-size:.66rem;background:rgba(255,255,255,.07);border:1px solid var(--line);padding:3px 9px;border-radius:20px;color:var(--muted);">${esc(p.pages)}</span>` : ''}
+        </div>` : ''}
+        ${p.description ? `<div style="font-size:.8rem;color:var(--muted);line-height:1.8;margin-top:9px;white-space:pre-line;">${esc(p.description)}</div>` : ''}
+        ${p.contents ? `<div style="background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-top:10px;">
+          <div style="font-size:.72rem;color:var(--gold);font-weight:600;margin-bottom:6px;">ماذا يحتوي</div>
+          ${String(p.contents).split('\n').filter(x=>x.trim()).map(x=>`<div style="font-size:.76rem;color:var(--muted);line-height:1.9;">✓ ${esc(x.trim())}</div>`).join('')}
+        </div>` : ''}
+        ${p.preview_url ? `<a href="${esc(p.preview_url)}" target="_blank" rel="noopener" style="display:block;text-align:center;background:rgba(52,152,219,.12);border:1px solid rgba(52,152,219,.3);border-radius:10px;padding:9px;margin-top:10px;font-size:.79rem;font-weight:600;color:#5dade2;text-decoration:none;">👁️ عاين عيّنة مجاناً</a>` : ''}
+        <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:12px;">
+          <div>
+            <div style="font-size:1.05rem;font-weight:800;color:var(--gold);">${Number(p.price_dzd).toLocaleString('ar-DZ')} دج</div>
+            <div style="font-size:.68rem;color:var(--muted);">أو ${p.price_usd}$ دولياً</div>
+          </div>
+          <div style="display:flex;gap:7px;">
+            ${p.preview_url ? `<a href="${esc(p.preview_url)}" target="_blank" rel="noopener" class="btn-copy" style="padding:10px 14px;margin:0;text-decoration:none;font-size:.78rem;white-space:nowrap;">👁️ معاينة</a>` : ''}
+            <button class="btn-gold" style="width:auto;padding:10px 20px;margin:0;" onclick="openShopPay('${p.id}')">شراء</button>
+          </div>
+        </div>
+        ${(p.file_format || p.file_size) ? `<div style="font-size:.7rem;color:var(--muted);margin-top:8px;padding-top:8px;border-top:1px solid var(--line);">📄 ${esc(p.file_format || '')}${p.file_format && p.file_size ? ' · ' : ''}${esc(p.file_size || '')}</div>` : ''}
+        ${p.sales_count > 2 ? `<div style="font-size:.68rem;color:var(--green);margin-top:7px;">✓ اشتراه ${p.sales_count} شخصاً</div>` : ''}
+        <div style="font-size:.66rem;color:var(--muted);margin-top:6px;">📥 تحميل فوري بعد الدفع · من «مشترياتي»</div>
+      </div>`).join('');
+  }
+  const le = document.getElementById('shopList');
+  if (le && shopProducts.length) le.insertAdjacentHTML('beforeend',
+    '<div id="shopEmpty" style="display:none;text-align:center;padding:18px;color:var(--muted);font-size:.84rem;">لا نتائج — اطلبه منا أدناه 👇</div>');
+  loadMyPurchases();
+}
+
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"]/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
+}
+
+async function loadMyPurchases() {
+  const box = document.getElementById('shopMine');
+  if (!box) return;
+  if (!session?.access_token) { box.innerHTML = ''; return; }
+  const d = await dpApi({ action: 'my_purchases' }, true);
+  const paid = (d?.purchases || []).filter(p => p.status === 'paid');
+  if (!paid.length) { box.innerHTML = ''; return; }
+  box.innerHTML = `
+    <div class="f-label">📥 مشترياتي</div>
+    ${paid.map(p => `
+      <div style="background:rgba(39,174,96,.08);border:1px solid rgba(39,174,96,.25);border-radius:var(--r);padding:12px;margin-bottom:8px;display:flex;align-items:center;gap:10px;">
+        <span style="font-size:22px;">${p.icon || '📘'}</span>
+        <div style="flex:1;min-width:0;">
+          <div style="font-size:.86rem;font-weight:600;">${esc(p.title)}</div>
+          <div style="font-size:.68rem;color:var(--muted);">${new Date(p.created_at).toLocaleDateString('ar-DZ')}</div>
+        </div>
+        ${p.file_url ? `<a href="${esc(p.file_url)}" target="_blank" rel="noopener" class="btn-gold" style="width:auto;padding:8px 15px;margin:0;font-size:.78rem;text-decoration:none;">تحميل</a>` : ''}
+      </div>`).join('')}`;
+}
+
+function openShopPay(id) {
+  if (!session?.access_token) { showToast('سجّل دخولك للشراء'); openAuth(); return; }
+  shopCurrent = shopProducts.find(p => p.id === id);
+  if (!shopCurrent) return;
+  const p = shopCurrent;
+  document.getElementById('shopPayInfo').innerHTML = `
+    <div style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;display:flex;gap:11px;align-items:center;">
+      <span style="font-size:30px;">${p.icon || '📘'}</span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-size:.92rem;font-weight:700;">${esc(p.title)}</div>
+        <div style="font-size:1rem;font-weight:800;color:var(--gold);margin-top:3px;">${Number(p.price_dzd).toLocaleString('ar-DZ')} دج</div>
+      </div>
+    </div>`;
+  document.getElementById('shopPayMethods').innerHTML = `
+    <button class="btn-gold" style="margin-bottom:8px;" onclick="shopBuy('chargily')">💳 البطاقة الذهبية / CIB</button>
+    <button class="btn-ghost" onclick="shopBuy('usdt')">₮ USDT — شبكة TRC20</button>
+    <div style="background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:10px;padding:11px 13px;margin-top:12px;font-size:.75rem;color:var(--muted);line-height:1.85;">
+      📥 <b style="color:var(--gold-l);">بعد الدفع:</b> ارجع للمتجر وستجد الملف في «مشترياتي».<br>
+      إن تأخر ظهوره، حدّث الصفحة بعد لحظات — وإن لم يظهر، راسلنا وسنرسله لك فوراً.
+    </div>`;
+  document.getElementById('shopPayResult').innerHTML = '';
+  showScreen('sv-shop-pay');
+}
+
+async function shopBuy(method) {
+  const res = document.getElementById('shopPayResult');
+  res.innerHTML = '<div style="text-align:center;padding:14px;color:var(--muted);font-size:.82rem;">⏳ جارٍ التحضير...</div>';
+  const d = await dpApi({ action: 'checkout', product_id: shopCurrent.id, method }, true);
+
+  if (!d) { res.innerHTML = '<div class="err-box">تعذّر الاتصال</div>'; return; }
+  if (d.already_owned) {
+    res.innerHTML = '<div style="background:rgba(39,174,96,.1);border:1px solid rgba(39,174,96,.3);border-radius:var(--r);padding:13px;color:var(--green);font-size:.84rem;">✓ اشتريت هذا المنتج مسبقاً — تجده في «مشترياتي»</div>';
+    return;
+  }
+  if (d.error) {
+    const msgs = { card_disabled: 'الدفع بالبطاقة غير مفعّل حالياً', intl_disabled: 'الدفع الدولي غير مفعّل حالياً' };
+    res.innerHTML = `<div class="err-box">${msgs[d.error] || 'تعذّر إنشاء الطلب'}</div>`;
+    return;
+  }
+
+  if (d.checkout_url) {
+    res.innerHTML = `<div style="text-align:center;padding:12px;color:var(--muted);font-size:.82rem;">جارٍ فتح صفحة الدفع...</div>`;
+    window.open(d.checkout_url, '_blank');
+    setTimeout(() => {
+      res.innerHTML = `<a href="${d.checkout_url}" target="_blank" rel="noopener" class="btn-gold" style="text-decoration:none;display:block;text-align:center;">افتح صفحة الدفع</a>
+        <div style="font-size:.76rem;color:var(--muted);margin-top:12px;line-height:1.9;background:rgba(255,255,255,.04);border:1px solid var(--line);border-radius:10px;padding:11px 13px;">
+        📥 بعد إتمام الدفع، ارجع لهذه الصفحة وستجد المنتج في «مشترياتي».<br>
+        قد يستغرق ظهوره لحظات — حدّث الصفحة إن لم تجده. وإن تأخر أكثر، راسلنا وسنرسله فوراً.
+      </div>`;
+    }, 900);
+    return;
+  }
+
+  if (d.usdt) {
+    res.innerHTML = `
+      <div style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;">
+        <div style="font-size:.8rem;color:var(--muted);margin-bottom:6px;">أرسل هذا المبلغ بالضبط (شبكة TRC20):</div>
+        <div style="font-size:1.15rem;font-weight:800;color:var(--gold);margin-bottom:10px;">${d.exact_amount} USDT</div>
+        <div style="font-size:.72rem;color:var(--muted);margin-bottom:4px;">إلى العنوان:</div>
+        <div class="code-box" style="font-size:.62rem;padding:9px;word-break:break-all;">${esc(d.address)}</div>
+        <button class="btn-copy" style="margin-top:8px;" onclick="navigator.clipboard.writeText('${esc(d.address)}');showToast('تم نسخ العنوان')">نسخ العنوان</button>
+        <button class="btn-gold" style="margin-top:10px;" onclick="shopConfirmUsdt()">✓ أرسلت — تحقّق الآن</button>
+      </div>`;
+    return;
+  }
+  res.innerHTML = '<div class="err-box">استجابة غير متوقعة</div>';
+}
+
+async function shopConfirmUsdt() {
+  const res = document.getElementById('shopPayResult');
+  showToast('⏳ جارٍ الفحص على الشبكة...');
+  const d = await dpApi({ action: 'confirm_usdt' }, true);
+  if (d?.ok) {
+    res.innerHTML = `<div style="background:rgba(39,174,96,.1);border:1px solid rgba(39,174,96,.3);border-radius:var(--r);padding:14px;color:var(--green);font-size:.86rem;text-align:center;">
+      ✅ تم تأكيد الدفع${d.file_url ? `<br><a href="${esc(d.file_url)}" target="_blank" rel="noopener" class="btn-gold" style="margin-top:10px;text-decoration:none;display:block;">تحميل المنتج</a>` : ''}</div>`;
+    loadMyPurchases();
+  } else {
+    showToast('❌ ' + (d?.reason || 'لم نجد التحويل بعد'));
+  }
+}
+
+
+// ===== إدارة المنتجات الرقمية (المالك) =====
+async function loadShopAdmin() {
+  const box = document.getElementById('shopAdminList');
+  if (!box) return;
+  box.innerHTML = '<div style="text-align:center;padding:16px;color:var(--muted);font-size:.82rem;">⏳ جارٍ التحميل...</div>';
+  const d = await dpApi({ action: 'admin_list' }, true);
+  const list = d?.products || [], rev = d?.revenue || {};
+  const total = Object.values(rev).reduce((a, r) => a + (r.dzd || 0), 0);
+  const count = Object.values(rev).reduce((a, r) => a + (r.n || 0), 0);
+
+  box.innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:14px;">
+      <div style="background:rgba(39,174,96,.1);border:1px solid rgba(39,174,96,.25);border-radius:10px;padding:11px;text-align:center;">
+        <div style="font-size:1.15rem;font-weight:800;color:var(--green);">${total.toLocaleString('ar-DZ')}</div>
+        <div style="font-size:.65rem;color:var(--muted);">دج إجمالي المبيعات</div>
+      </div>
+      <div style="background:rgba(212,160,23,.1);border:1px solid rgba(212,160,23,.25);border-radius:10px;padding:11px;text-align:center;">
+        <div style="font-size:1.15rem;font-weight:800;color:var(--gold);">${count}</div>
+        <div style="font-size:.65rem;color:var(--muted);">عملية بيع</div>
+      </div>
+    </div>` +
+    (list.length ? list.map(p => {
+      const r = rev[p.id] || { n: 0, dzd: 0 };
+      return `<div style="background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:12px;margin-bottom:9px;">
+        <div style="display:flex;align-items:center;gap:9px;">
+          <span style="font-size:22px;">${p.icon || '📘'}</span>
+          <div style="flex:1;min-width:0;">
+            <div style="font-size:.86rem;font-weight:600;">${esc(p.title)} ${p.active ? '' : '<span style="color:var(--red);font-size:.7rem;">(مخفي)</span>'}</div>
+            <div style="font-size:.72rem;color:var(--muted);">${Number(p.price_dzd).toLocaleString('ar-DZ')} دج · بيع ${r.n} مرة · ${r.dzd.toLocaleString('ar-DZ')} دج</div>
+          </div>
+        </div>
+        <div style="display:flex;gap:7px;margin-top:9px;">
+          <button class="btn-copy" style="flex:1;font-size:.74rem;" onclick='editProduct(${JSON.stringify(p).replace(/'/g, "&#39;")})'>✏️ تعديل</button>
+          <button class="btn-copy" style="flex:1;font-size:.74rem;color:var(--red);" onclick="deleteProduct('${p.id}')">🗑️ حذف</button>
+        </div>
+      </div>`;
+    }).join('') : '<div style="text-align:center;padding:18px;color:var(--muted);font-size:.82rem;">لا توجد منتجات — أضف أولها</div>');
+}
+
+function editProduct(p) {
+  const e = p || { icon: '📘', price_dzd: 1000, price_usd: 5, active: true, sort_order: 0 };
+  const box = document.getElementById('shopAdminList');
+  box.innerHTML = `
+    <div style="background:var(--panel);border:1px solid rgba(212,160,23,.3);border-radius:var(--r);padding:14px;">
+      <div style="font-size:.9rem;font-weight:700;color:var(--gold);margin-bottom:12px;">${p ? '✏️ تعديل منتج' : '➕ منتج جديد'}</div>
+      <input type="hidden" id="dpId" value="${e.id || ''}">
+      <div class="f-label">الرمز التعبيري</div>
+      <input class="f-input" id="dpIcon" value="${esc(e.icon)}" maxlength="4">
+      <div class="f-label">العنوان *</div>
+      <input class="f-input" id="dpTitle" value="${esc(e.title || '')}" placeholder="دليل التجارة الإلكترونية في الجزائر">
+      <div class="f-label">سطر التعريف</div>
+      <input class="f-input" id="dpSub" value="${esc(e.subtitle || '')}" placeholder="80 صفحة PDF · محدّث 2026">
+      <div class="f-label">الوصف</div>
+      <textarea class="f-input" id="dpDesc" rows="4" placeholder="ما الذي سيحصل عليه المشتري؟">${esc(e.description || '')}</textarea>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;"><div class="f-label">السعر بالدينار</div><input class="f-input" id="dpDzd" type="number" value="${e.price_dzd}"></div>
+        <div style="flex:1;"><div class="f-label">بالدولار</div><input class="f-input" id="dpUsd" type="number" step="0.5" value="${e.price_usd}"></div>
+      </div>
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;"><div class="f-label">الصيغة</div><input class="f-input" id="dpFormat" value="${esc(e.format || '')}" placeholder="PDF"></div>
+        <div style="flex:1;"><div class="f-label">الحجم</div><input class="f-input" id="dpPages" value="${esc(e.pages || '')}" placeholder="80 صفحة"></div>
+      </div>
+      <div class="f-label">المحتويات (بند في كل سطر)</div>
+      <textarea class="f-input" id="dpContents" rows="4" placeholder="حاسبة الربح الصافي&#10;متابعة الطلبات&#10;تقرير شهري">${esc(e.contents || '')}</textarea>
+      <div class="f-label">رابط المعاينة المجانية (عيّنة يراها قبل الشراء)</div>
+      <input class="f-input" id="dpPreview" value="${esc(e.preview_url || '')}" placeholder="https://drive.google.com/... (عيّنة)">
+      <div style="display:flex;gap:8px;">
+        <div style="flex:1;"><div class="f-label">الصيغة</div><input class="f-input" id="dpFmt" value="${esc(e.file_format || '')}" placeholder="Excel (.xlsx)"></div>
+        <div style="flex:1;"><div class="f-label">الحجم</div><input class="f-input" id="dpSize" value="${esc(e.file_size || '')}" placeholder="50 كيلوبايت"></div>
+      </div>
+      <div class="f-label">👁️ رابط المعاينة المجانية (اختياري)</div>
+      <input class="f-input" id="dpPrev" value="${esc(e.preview_url || '')}" placeholder="رابط نسخة ناقصة أو صور">
+      <div class="f-label">🔒 رابط الملف الكامل (يُكشف بعد الدفع فقط)</div>
+      <input class="f-input" id="dpFile" value="${esc(e.file_url || '')}" placeholder="https://drive.google.com/...">
+      <label style="display:flex;align-items:center;gap:8px;margin:12px 0;font-size:.84rem;cursor:pointer;">
+        <input type="checkbox" id="dpActive" ${e.active !== false ? 'checked' : ''} style="width:18px;height:18px;">
+        <span>معروض للبيع</span>
+      </label>
+      <button class="btn-gold" onclick="saveProduct()">💾 حفظ</button>
+      <button class="btn-ghost" style="margin-top:8px;" onclick="loadShopAdmin()">إلغاء</button>
+    </div>`;
+}
+
+async function saveProduct() {
+  const V = (id) => (document.getElementById(id)?.value || '').trim();
+  const p = {
+    id: V('dpId') || null,
+    icon: V('dpIcon'),
+    title: V('dpTitle'),
+    subtitle: V('dpSub'),
+    description: V('dpDesc'),
+    price_dzd: Number(V('dpDzd')),
+    price_usd: Number(V('dpUsd')),
+    file_url: V('dpFile'),
+    preview_url: V('dpPrev'),
+    file_format: V('dpFmt'),
+    file_size: V('dpSize'),
+    preview_url: document.getElementById('dpPreview').value.trim(),
+    contents: document.getElementById('dpContents').value.trim(),
+    format: document.getElementById('dpFormat').value.trim(),
+    pages: document.getElementById('dpPages').value.trim(),
+    active: !!document.getElementById('dpActive')?.checked,
+  };
+  if (!p.title) { showToast('العنوان مطلوب'); return; }
+  const d = await dpApi({ action: 'admin_save', product: p }, true);
+  if (d?.ok) { showToast('✅ تم الحفظ'); loadShopAdmin(); }
+  else showToast('❌ تعذّر الحفظ');
+}
+
+async function deleteProduct(id) {
+  if (!confirm('حذف هذا المنتج نهائياً؟')) return;
+  const d = await dpApi({ action: 'admin_delete', id }, true);
+  if (d?.ok) { showToast('تم الحذف'); loadShopAdmin(); }
+}
+
+
+// ===== بحث في المنتجات =====
+function filterShop() {
+  const q = (document.getElementById('shopSearch')?.value || '').trim().toLowerCase();
+  const cards = document.querySelectorAll('#shopList [data-sp]');
+  let shown = 0;
+  cards.forEach(el => {
+    const hay = (el.getAttribute('data-sp') || '').toLowerCase();
+    const ok = !q || hay.includes(q);
+    el.style.display = ok ? 'block' : 'none';
+    if (ok) shown++;
+  });
+  const ask = document.getElementById('shopAsk');
+  const empty = document.getElementById('shopEmpty');
+  if (empty) empty.style.display = (q && shown === 0) ? 'block' : 'none';
+  // إن لم يجد شيئاً، نلفت نظره لصندوق الطلب
+  if (ask && q && shown === 0) ask.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+// ===== إرسال طلب منتج =====
+async function sendProductRequest() {
+  const ta = document.getElementById('askText');
+  const res = document.getElementById('askResult');
+  const text = (ta?.value || '').trim();
+  if (text.length < 5) { showToast('اكتب طلبك بوضوح أكثر'); return; }
+
+  res.innerHTML = '<div style="font-size:.78rem;color:var(--muted);">⏳ جارٍ الإرسال...</div>';
+  const h = { 'Content-Type': 'application/json', 'apikey': SB_KEY };
+  if (session?.access_token) h['Authorization'] = 'Bearer ' + session.access_token;
+
+  try {
+    const r = await fetch(SB_URL + '/functions/v1/product-requests', {
+      method: 'POST', headers: h,
+      body: JSON.stringify({ action: 'send', request: text }),
+    });
+    const d = await r.json();
+    if (d.ok) {
+      ta.value = '';
+      res.innerHTML = '<div style="background:rgba(39,174,96,.12);border:1px solid rgba(39,174,96,.3);border-radius:9px;padding:10px;font-size:.79rem;color:var(--green);line-height:1.75;">✅ وصلنا طلبك. سنراجعه ونخبرك إن وفّرناه.</div>';
+    } else if (d.error === 'rate_limited') {
+      res.innerHTML = '<div style="font-size:.78rem;color:var(--gold);">أرسلت طلبات كثيرة — حاول لاحقاً</div>';
+    } else {
+      res.innerHTML = '<div style="font-size:.78rem;color:var(--red);">تعذّر الإرسال — حاول مجدداً</div>';
+    }
+  } catch (_) {
+    res.innerHTML = '<div style="font-size:.78rem;color:var(--red);">تعذّر الاتصال</div>';
+  }
+}
+
+// ===== طلبات الزبائن (المالك) =====
+async function loadProductRequests() {
+  const box = document.getElementById('reqAdminList');
+  if (!box) return;
+  box.innerHTML = '<div style="text-align:center;padding:14px;color:var(--muted);font-size:.82rem;">⏳ جارٍ التحميل...</div>';
+  try {
+    const r = await fetch(SB_URL + '/functions/v1/product-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + (session?.access_token || '') },
+      body: JSON.stringify({ action: 'admin_list' }),
+    });
+    const d = await r.json();
+    const reqs = d?.requests || [], cn = d?.counts || {};
+    if (!reqs.length) {
+      box.innerHTML = '<div style="text-align:center;padding:16px;color:var(--muted);font-size:.82rem;">لا توجد طلبات بعد</div>';
+      return;
+    }
+    const stLbl = { new: '🆕 جديد', planned: '📌 مخطط', done: '✅ تم', declined: '✖️ مرفوض' };
+    const stCol = { new: 'var(--gold)', planned: '#3498DB', done: 'var(--green)', declined: 'var(--muted)' };
+    box.innerHTML =
+      `<div style="font-size:.76rem;color:var(--muted);margin-bottom:10px;">🆕 ${cn.new || 0} جديد · 📌 ${cn.planned || 0} مخطط · ✅ ${cn.done || 0} تم</div>` +
+      reqs.map(q => `
+        <div style="background:var(--panel);border:1px solid var(--line);border-inline-start:3px solid ${stCol[q.status]};border-radius:10px;padding:11px 13px;margin-bottom:8px;">
+          <div style="font-size:.85rem;line-height:1.8;color:var(--text);">${esc(q.request)}</div>
+          <div style="font-size:.66rem;color:var(--muted);margin-top:6px;">${esc(q.email || 'زائر')} · ${new Date(q.created_at).toLocaleDateString('ar-DZ')}</div>
+          <div style="display:flex;gap:6px;margin-top:9px;flex-wrap:wrap;">
+            ${['new','planned','done','declined'].map(s =>
+              `<button class="btn-copy" style="font-size:.7rem;padding:5px 9px;${q.status===s?'color:'+stCol[s]+';border-color:'+stCol[s]+'55;':''}" onclick="setReqStatus('${q.id}','${s}')">${stLbl[s]}</button>`).join('')}
+          </div>
+        </div>`).join('');
+  } catch (_) {
+    box.innerHTML = '<div style="font-size:.8rem;color:var(--red);padding:10px;">تعذّر التحميل</div>';
+  }
+}
+
+async function setReqStatus(id, status) {
+  await fetch(SB_URL + '/functions/v1/product-requests', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY,
+      'Authorization': 'Bearer ' + (session?.access_token || '') },
+    body: JSON.stringify({ action: 'admin_update', id, status }),
+  });
+  loadProductRequests();
+}
+
+// ========== STATE ==========
+const SB_URL  = 'https://rnaqsvmtszxgbvzaagzx.supabase.co';
+const SB_KEY  = 'sb_publishable_ly90vH9XsCT_05kxQenomw_LE5aCud-';
+
+let lang = localStorage.getItem('tl') || 'ar';
+let hist = JSON.parse(localStorage.getItem('th') || '[]');
+let curScreen = 'app';
+let curTab = 'h';
+
+// ========== CLAUDE API ==========
+// معالجة موحّدة لأخطاء الذكاء الاصطناعي
+function handleAiError(e, errEl) {
+  const m = String(e && e.message);
+  if (m === 'ACCOUNT_BANNED') {
+    if (errEl) errEl.style.display = 'none';
+    showToast(M('msg_banned'));
+    return;
+  }
+  if (m === 'LOGIN_REQUIRED') {
+    if (errEl) errEl.style.display = 'none';
+    showToast(M('msg_needlogin'));
+    setTimeout(() => openAuth(), 400);
+    return;
+  }
+  if (m === 'LIMIT_REACHED') {
+    if (errEl) errEl.style.display = 'none';
+    setTimeout(() => { document.getElementById('subModal').classList.add('open'); }, 300);
+    return;
+  }
+  if (m === 'QUOTA_OUT') {
+    if (errEl) errEl.style.display = 'none';
+    quotaLeft = 0; refreshProUI();
+    showToast(M('msg_quotaout'));
+    setTimeout(() => { document.getElementById('subModal').classList.add('open'); }, 400);
+    return;
+  }
+  if (m === 'NEEDS_PROMAX') {
+    if (errEl) errEl.style.display = 'none';
+    premiumTrialUsed = true; refreshProUI();
+    setTimeout(() => { document.getElementById('maxModal').classList.add('open'); }, 300);
+    return;
+  }
+  if (m.startsWith('RATE_LIMITED')) {
+    if (errEl) errEl.style.display = 'none';
+    const mins = m.split('|')[1] || '60';
+    showToast('⏳ طلبات كثيرة في وقت قصير. حاول بعد ' + mins + ' دقيقة'
+      + (session ? '' : '، أو أنشئ حساباً مجانياً لحدّ أعلى'));
+    if (!session) setTimeout(() => openAuth(), 1400);
+    return;
+  }
+  if (m === 'NEEDS_PRO') {
+    if (errEl) errEl.style.display = 'none';
+    premiumTrialUsed = true; refreshProUI();
+    setTimeout(() => { document.getElementById('subModal').classList.add('open'); }, 300);
+    return;
+  }
+  if (errEl) {
+    errEl.textContent = m === 'AI_NOT_CONFIGURED' ? M('msg_noai') : M('msg_err');
+    errEl.style.display = 'block';
+  }
+}
+
+async function aiCall(payload) {
+  const needsLogin = payload.needs === 'pro' || payload.needs === 'promax' || payload.action === 'consume' || payload.action === 'status';
+  if (needsLogin && !session?.access_token) throw new Error('LOGIN_REQUIRED');
+  const r = await fetch(SB_URL + '/functions/v1/ai', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'apikey': SB_KEY,
+      'Authorization': 'Bearer ' + session.access_token
+    },
+    body: JSON.stringify(payload)
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    if (d.error === 'login_required')   throw new Error('LOGIN_REQUIRED');
+    if (d.error === 'limit_reached')    throw new Error('LIMIT_REACHED');
+    if (d.error === 'quota_exhausted')  throw new Error('QUOTA_OUT');
+    if (d.error === 'needs_promax')     throw new Error('NEEDS_PROMAX');
+    if (d.error === 'needs_pro')        throw new Error('NEEDS_PRO');
+    if (d.error === 'not_configured')   throw new Error('AI_NOT_CONFIGURED');
+    if (d.error === 'account_banned')   throw new Error('ACCOUNT_BANNED');
+    if (d.error === 'build_limit_reached') throw new Error('BUILD_LIMIT');
+    if (d.error === 'rate_limited') {
+      const mins = Math.max(1, Math.ceil((d.retry_after || 3600) / 60));
+      throw new Error('RATE_LIMITED|' + mins);
+    }
+    throw new Error(d.details || d.error || r.status);
+  }
+  return d;
+}
+
+async function ai(prompt, opts) {
+  const o = opts || {};
+  const payload = { prompt, max_tokens: o.maxTokens || 1200 };
+  if (o.needs) payload.needs = o.needs;
+  const d = await aiCall(payload);
+  if (typeof d.remaining === 'number') quotaLeft = d.remaining;
+  if (typeof d.quota === 'number') quotaTotal = d.quota;
+  if (typeof d.trial_used === 'boolean') premiumTrialUsed = d.trial_used;
+  refreshProUI();
+  return d.text || '';
+}
+
+// خصم رصيد لخدمة تعمل داخل الجهاز (إزالة الخلفية)
+async function consumeUse() {
+  const d = await aiCall({ action: 'consume' });
+  if (typeof d.remaining === 'number') quotaLeft = d.remaining;
+  if (typeof d.quota === 'number') quotaTotal = d.quota;
+  refreshProUI();
+}
+
+// جلب الرصيد المتبقي
+async function loadUsage() {
+  try {
+    const d = await aiCall({ action: 'status' });
+    quotaLeft  = d.remaining;
+    quotaTotal = d.quota;
+    if (typeof d.trial_used === 'boolean') premiumTrialUsed = d.trial_used;
+    refreshProUI();
+  } catch (e) {}
+}
+
+let quotaLeft = null;   // الاستخدامات المتبقية
+let premiumTrialUsed = null; // هل استُهلكت التجربة المجانية لخدمات برو/برو ماكس؟
+let quotaTotal = null;  // إجمالي الحصة
+
+// ========== SERVICE RUNNER ==========
+const MSG = {"ar": {"msg_prod": "⚠️ أدخل اسم المنتج", "msg_text": "⚠️ أدخل النص", "msg_lang": "⚠️ اختر لغة واحدة على الأقل", "msg_store": "⚠️ أدخل اسم المتجر", "msg_camp": "⚠️ أدخل المنتج أو الحملة", "msg_cmsg": "⚠️ أدخل رسالة العميل", "msg_pinfo": "⚠️ أدخل معلومات المنتج", "msg_p": "⚠️ أدخل المنتج", "msg_sales": "⚠️ أدخل بيانات المبيعات", "msg_ptype": "⚠️ أدخل نوع المنتجات", "msg_img": "⚠️ اختر صورة أولاً", "msg_brand": "⚠️ أدخل اسم العلامة التجارية", "msg_prices": "⚠️ أدخل سعر الشراء والبيع", "msg_comments": "⚠️ الصق تعليقات العملاء", "msg_biz": "⚠️ أدخل نشاطك التجاري", "msg_copied": "✓ تم النسخ", "msg_cleared": "✓ تم مسح السجل", "msg_empty": "السجل فارغ", "msg_err": "❌ حدث خطأ. تأكد من اتصالك بالإنترنت وحاول مجددًا.", "msg_pay": "⚙️ سيتم تفعيل الدفع قريباً جداً", "msg_badcode": "❌ رمز غير صحيح", "msg_mon": "✅ تم تفعيل اشتراكك الشهري!", "msg_year": "✅ تم تفعيل اشتراكك السنوي!", "msg_logged": "أنت مسجّل دخول بالفعل", "msg_bademail": "⚠️ أدخل بريداً إلكترونياً صحيحاً", "msg_shortpass": "⚠️ كلمة السر 6 أحرف على الأقل", "msg_wrongcreds": "❌ البريد أو كلمة السر غير صحيحة", "msg_exists": "❌ هذا البريد مسجّل مسبقاً — سجّل الدخول", "msg_autherr": "❌ تعذّر إتمام العملية، حاول مجدداً", "msg_checkmail": "✅ تم إنشاء حسابك! افتح بريدك واضغط رابط التأكيد ثم سجّل الدخول.", "msg_welcome": "✅ أهلاً بك في تاجر", "msg_loggedout": "تم تسجيل الخروج", "msg_resetsent": "✅ أرسلنا رابطاً إلى بريدك. افتحه من هذا الجهاز لتعيين كلمة سر جديدة.", "msg_needlogin": "سجّل الدخول أولاً لتفعيل اشتراكك", "msg_entercode": "أدخل رمز التفعيل الذي وصلك بعد الدفع:", "msg_codeused": "❌ هذا الرمز مستخدم من قبل", "msg_days": "يوم متبقٍ", "msg_noai": "⚙️ الخدمة قيد التجهيز — سنفعّلها قريباً جداً", "msg_limit": "انتهت تجربتك المجانية — اشترك للمتابعة", "msg_popup": "اسمح بالنوافذ المنبثقة لعرض المعاينة", "msg_needmax": "هذه الخدمة تتطلب اشتراك برو ماكس", "msg_quotaout": "انتهت حصتك من الاستخدامات — جدّد اشتراكك للمتابعة", "msg_dzdsoon": "💳 الدفع بالبطاقة سيُفعَّل قريباً جداً — استخدم USDT الآن", "msg_addrsoon": "العنوان سيُضاف قريباً", "msg_txreq": "⚠️ أدخل رقم عملية التحويل", "msg_ordersent": "✅ وصل طلبك! سنتحقق من التحويل ونفعّل اشتراكك خلال ساعات قليلة. ستجد الحالة بالأسفل.", "msg_orderpending": "لديك طلب قيد المراجعة بالفعل", "msg_st_pending": "قيد المراجعة", "msg_st_paid": "مُفعَّل ✓", "msg_st_rejected": "مرفوض", "msg_instant": "⚡ <b>تم التحقق من التحويل تلقائياً!</b><br>اشتراكك مُفعَّل الآن. استمتع 🎉", "msg_activated": "🎉 تم تفعيل اشتراكك", "msg_pending_wait": "⏳ لم نجد التحويل على الشبكة بعد — قد يحتاج دقيقة للتأكيد. سجّلنا طلبك وسيُفعَّل تلقائياً أو نراجعه يدوياً.", "msg_txused": "❌ رقم التحويل هذا مُستخدم من قبل", "msg_notyet": "⏳ لم نجد دفعتك بعد. إن أرسلتها للتو انتظر دقيقة ثم أعد المحاولة — وتأكد من إرسال المبلغ بالقروش بالضبط.", "msg_claimed": "❌ هذه الدفعة مرتبطة بحساب آخر", "msg_expired": "انتهت مهلة الطلب — أعد فتح صفحة الاشتراك", "msg_cardwait": "⏳ افتحنا صفحة الدفع في نافذة جديدة. أكمل الدفع هناك وسيُفعَّل اشتراكك تلقائياً — ابقَ في هذه الصفحة.", "msg_gateway": "❌ تعذّر فتح صفحة الدفع، حاول مجدداً بعد قليل", "msg_intlsoon": "💳 الدفع الدولي سيُفعَّل قريباً — استخدم البطاقة الجزائرية أو USDT", "msg_needcur": "⚠️ أدخل كلمة السر الحالية", "msg_wrongcur": "❌ كلمة السر الحالية غير صحيحة", "msg_nomatch": "⚠️ كلمتا السر الجديدتان غير متطابقتين", "msg_samepass": "⚠️ كلمة السر الجديدة مطابقة للحالية", "msg_passok": "✅ تم تغيير كلمة السر بنجاح", "msg_linkexp": "انتهت صلاحية رابط الاستعادة — اطلب رابطاً جديداً", "msg_codesent": "✅ أرسلنا رابط الاستعادة إلى", "msg_waitresend": "⏳ انتظر دقيقة قبل طلب رمز جديد", "msg_wsprompt": "⚠️ صف الموقع الذي تريده أولاً", "msg_apprompt": "⚠️ صف التطبيق الذي تريده أولاً", "msg_logodl": "✓ تم تحميل الشعار", "msg_reqsent": "✅ وصل طلبك! سنراسلك قريباً بعرض السعر.", "msg_reqshort": "⚠️ اكتب وصفاً أطول قليلاً (10 أحرف على الأقل)", "msg_contentblocked": "🚫 هذا الطلب يحتوي محتوى محظوراً (إباحي/جنسي) ولا يمكن تنفيذه. جرّب وصفاً مختلفاً.", "msg_cxsent": "✅ وصلت شكواك! سنراجعها ونردّ عليك قريباً.", "msg_cxsubject": "⚠️ اكتب عنواناً واضحاً للشكوى", "msg_cxshort": "⚠️ اشرح المشكلة بتفصيل أكثر (10 أحرف على الأقل)", "msg_banned": "🚫 تم حظر حسابك. تواصل مع الدعم إن كان هذا خطأً.", "msg_build_limit": "⚠️ استنفدت حد 20 توليداً كاملاً هذا الشهر. يتجدد الحد أول الشهر القادم."}, "fr": {"msg_prod": "⚠️ Entrez le nom du produit", "msg_text": "⚠️ Entrez le texte", "msg_lang": "⚠️ Choisissez au moins une langue", "msg_store": "⚠️ Entrez le nom de la boutique", "msg_camp": "⚠️ Entrez le produit ou la campagne", "msg_cmsg": "⚠️ Entrez le message du client", "msg_pinfo": "⚠️ Entrez les informations du produit", "msg_p": "⚠️ Entrez le produit", "msg_sales": "⚠️ Entrez vos données de ventes", "msg_ptype": "⚠️ Entrez le type de produits", "msg_img": "⚠️ Choisissez d'abord une image", "msg_brand": "⚠️ Entrez le nom de la marque", "msg_prices": "⚠️ Entrez les prix d'achat et de vente", "msg_comments": "⚠️ Collez les commentaires des clients", "msg_biz": "⚠️ Entrez votre activité", "msg_copied": "✓ Copié", "msg_cleared": "✓ Historique effacé", "msg_empty": "L'historique est vide", "msg_err": "❌ Une erreur est survenue. Vérifiez votre connexion et réessayez.", "msg_pay": "⚙️ Le paiement sera activé très bientôt", "msg_badcode": "❌ Code invalide", "msg_mon": "✅ Abonnement mensuel activé !", "msg_year": "✅ Abonnement annuel activé !", "msg_logged": "Vous êtes déjà connecté", "msg_bademail": "⚠️ Entrez un e-mail valide", "msg_shortpass": "⚠️ Mot de passe : 6 caractères minimum", "msg_wrongcreds": "❌ E-mail ou mot de passe incorrect", "msg_exists": "❌ Cet e-mail existe déjà — connectez-vous", "msg_autherr": "❌ Opération impossible, réessayez", "msg_checkmail": "✅ Compte créé ! Ouvrez votre e-mail, confirmez, puis connectez-vous.", "msg_welcome": "✅ Bienvenue sur Tajer", "msg_loggedout": "Déconnecté", "msg_resetsent": "✅ Lien envoyé par e-mail. Ouvrez-le depuis cet appareil.", "msg_needlogin": "Connectez-vous pour activer votre abonnement", "msg_entercode": "Entrez le code d'activation reçu après paiement :", "msg_codeused": "❌ Ce code a déjà été utilisé", "msg_days": "jours restants", "msg_noai": "⚙️ Service en préparation — bientôt disponible", "msg_limit": "Essai gratuit terminé — abonnez-vous pour continuer", "msg_popup": "Autorisez les pop-ups pour l'aperçu", "msg_needmax": "Ce service nécessite Pro Max", "msg_quotaout": "Votre quota est épuisé — renouvelez pour continuer", "msg_dzdsoon": "💳 Paiement par carte bientôt disponible — utilisez USDT", "msg_addrsoon": "Adresse bientôt disponible", "msg_txreq": "⚠️ Entrez le hash de transaction", "msg_ordersent": "✅ Demande reçue ! Vérification en cours, activation sous quelques heures.", "msg_orderpending": "Vous avez déjà une demande en cours", "msg_st_pending": "En attente", "msg_st_paid": "Activé ✓", "msg_st_rejected": "Rejeté", "msg_instant": "⚡ <b>Transaction vérifiée automatiquement !</b><br>Votre abonnement est actif. Profitez-en 🎉", "msg_activated": "🎉 Abonnement activé", "msg_pending_wait": "⏳ Transaction pas encore trouvée — cela peut prendre une minute. Votre demande est enregistrée.", "msg_txused": "❌ Ce hash de transaction a déjà été utilisé", "msg_notyet": "⏳ Paiement introuvable. Attendez une minute et réessayez — vérifiez le montant exact.", "msg_claimed": "❌ Ce paiement est lié à un autre compte", "msg_expired": "Demande expirée — rouvrez la page d'abonnement", "msg_cardwait": "⏳ La page de paiement s'est ouverte. Terminez le paiement, l'activation sera automatique — restez ici.", "msg_gateway": "❌ Impossible d'ouvrir la page de paiement, réessayez", "msg_intlsoon": "💳 Paiement international bientôt — utilisez la carte algérienne ou USDT", "msg_needcur": "⚠️ Entrez le mot de passe actuel", "msg_wrongcur": "❌ Mot de passe actuel incorrect", "msg_nomatch": "⚠️ Les mots de passe ne correspondent pas", "msg_samepass": "⚠️ Le nouveau mot de passe est identique à l'ancien", "msg_passok": "✅ Mot de passe modifié avec succès", "msg_linkexp": "Lien expiré — demandez-en un nouveau", "msg_codesent": "✅ Lien de réinitialisation envoyé à", "msg_waitresend": "⏳ Attendez une minute avant de redemander", "msg_wsprompt": "⚠️ Décrivez d'abord le site voulu", "msg_apprompt": "⚠️ Décrivez d'abord l'app voulue", "msg_logodl": "✓ Logo téléchargé", "msg_reqsent": "✅ Demande reçue ! Nous vous recontacterons bientôt.", "msg_reqshort": "⚠️ Écrivez une description un peu plus longue (10 caractères min)", "msg_contentblocked": "🚫 Cette demande contient un contenu interdit (pornographique/sexuel) et ne peut être traitée. Essayez une autre description.", "msg_cxsent": "✅ Réclamation reçue ! Nous l'examinerons et vous répondrons bientôt.", "msg_cxsubject": "⚠️ Écrivez un titre clair pour la réclamation", "msg_cxshort": "⚠️ Expliquez le problème plus en détail (10 caractères min)", "msg_banned": "🚫 Votre compte a été suspendu. Contactez le support en cas d'erreur.", "msg_build_limit": "⚠️ Vous avez atteint la limite de 20 constructions ce mois-ci."}, "en": {"msg_prod": "⚠️ Enter the product name", "msg_text": "⚠️ Enter the text", "msg_lang": "⚠️ Select at least one language", "msg_store": "⚠️ Enter the store name", "msg_camp": "⚠️ Enter the product or campaign", "msg_cmsg": "⚠️ Enter the customer message", "msg_pinfo": "⚠️ Enter the product information", "msg_p": "⚠️ Enter the product", "msg_sales": "⚠️ Enter your sales data", "msg_ptype": "⚠️ Enter the product type", "msg_img": "⚠️ Choose an image first", "msg_brand": "⚠️ Enter the brand name", "msg_prices": "⚠️ Enter buy and sell prices", "msg_comments": "⚠️ Paste the customer comments", "msg_biz": "⚠️ Enter your business", "msg_copied": "✓ Copied", "msg_cleared": "✓ History cleared", "msg_empty": "History is empty", "msg_err": "❌ An error occurred. Check your connection and try again.", "msg_pay": "⚙️ Payment will be enabled very soon", "msg_badcode": "❌ Invalid code", "msg_mon": "✅ Monthly subscription activated!", "msg_year": "✅ Yearly subscription activated!", "msg_logged": "You are already signed in", "msg_bademail": "⚠️ Enter a valid email", "msg_shortpass": "⚠️ Password must be at least 6 characters", "msg_wrongcreds": "❌ Wrong email or password", "msg_exists": "❌ Email already registered — sign in", "msg_autherr": "❌ Could not complete, try again", "msg_checkmail": "✅ Account created! Open your email, confirm, then sign in.", "msg_welcome": "✅ Welcome to Tajer", "msg_loggedout": "Signed out", "msg_resetsent": "✅ Link sent to your email. Open it on this device to set a new password.", "msg_needlogin": "Sign in first to activate your subscription", "msg_entercode": "Enter the activation code you received after payment:", "msg_codeused": "❌ This code has already been used", "msg_days": "days left", "msg_noai": "⚙️ Service being set up — available very soon", "msg_limit": "Free trial ended — subscribe to continue", "msg_popup": "Allow pop-ups to see the preview", "msg_needmax": "This service requires Pro Max", "msg_quotaout": "Your usage quota is used up — renew to continue", "msg_dzdsoon": "💳 Card payment coming very soon — use USDT for now", "msg_addrsoon": "Address coming soon", "msg_txreq": "⚠️ Enter the transaction hash", "msg_ordersent": "✅ Request received! We'll verify and activate within a few hours.", "msg_orderpending": "You already have a pending request", "msg_st_pending": "Pending", "msg_st_paid": "Activated ✓", "msg_st_rejected": "Rejected", "msg_instant": "⚡ <b>Transaction verified automatically!</b><br>Your subscription is now active. Enjoy 🎉", "msg_activated": "🎉 Subscription activated", "msg_pending_wait": "⏳ Transaction not found on-chain yet — it may take a minute to confirm. Your request is recorded.", "msg_txused": "❌ This transaction hash was already used", "msg_notyet": "⏳ Payment not found yet. Wait a minute and try again — check you sent the exact amount.", "msg_claimed": "❌ This payment is linked to another account", "msg_expired": "Request expired — reopen the subscription page", "msg_cardwait": "⏳ Payment page opened in a new tab. Complete payment there and activation happens automatically — stay on this page.", "msg_gateway": "❌ Could not open the payment page, please try again", "msg_intlsoon": "💳 International payment coming soon — use the Algerian card or USDT", "msg_needcur": "⚠️ Enter your current password", "msg_wrongcur": "❌ Current password is incorrect", "msg_nomatch": "⚠️ New passwords do not match", "msg_samepass": "⚠️ New password is the same as the current one", "msg_passok": "✅ Password changed successfully", "msg_linkexp": "Recovery link expired — request a new one", "msg_codesent": "✅ Reset link sent to", "msg_waitresend": "⏳ Wait a minute before requesting another code", "msg_wsprompt": "⚠️ Describe the website you want first", "msg_apprompt": "⚠️ Describe the app you want first", "msg_logodl": "✓ Logo downloaded", "msg_reqsent": "✅ Request received! We'll get back to you soon.", "msg_reqshort": "⚠️ Write a slightly longer description (10 characters min)", "msg_contentblocked": "🚫 This request contains forbidden content (pornographic/sexual) and cannot be processed. Try a different description.", "msg_cxsent": "✅ Complaint received! We'll review it and reply soon.", "msg_cxsubject": "⚠️ Write a clear complaint subject", "msg_cxshort": "⚠️ Explain the issue in more detail (10 characters min)", "msg_banned": "🚫 Your account has been suspended. Contact support if this is an error.", "msg_build_limit": "⚠️ You have reached the limit of 20 full builds this month."}};
+function M(k){ return (MSG[lang] && MSG[lang][k]) || MSG.ar[k] || k; }
+
+// يضيف تعليمة صريحة بلغة الواجهة لكل طلب ذكاء اصطناعي
+function withUiLang(prompt) {
+  const names = { ar:'العربية', fr:'الفرنسية (French)', en:'الإنجليزية (English)' };
+  const target = names[lang] || names.ar;
+  return prompt + `
+
+[تعليمة إلزامية] اكتب ردك بالكامل باللغة ${target} فقط — كل العناوين والشروحات والمحتوى. لا تستخدم أي لغة أخرى في الرد، إلا إذا طُلب منك صراحةً في نص المهمة أعلاه توليد محتوى بلغة محددة أخرى (مثل خدمة الترجمة أو محتوى تسويقي بلغة مطلوبة) — في تلك الحالة اجعل العناوين والشروحات بـ${target} والمحتوى المطلوب باللغة المحددة.`;
+}
+
+// معرّفات خدمات برو النصية — تحتاج تعليم الطلب لتتبع التجربة المجانية
+const PRO_SERVICE_IDS = new Set(['pc', 'vs', 'wp', 'oc', 'cm']);
+
+async function run(id, prompt, svcName) {
+  // اجعل الذكاء الاصطناعي يرد بلغة الواجهة الحالية
+  prompt = withUiLang(prompt);
+  const loadEl = document.getElementById(id + '-load');
+  const errEl = document.getElementById(id + '-err');
+  const resEl = document.getElementById(id + '-res');
+  const outEl = document.getElementById(id + '-out');
+  const btnEl = document.getElementById(id + '-btn');
+  loadEl.style.display = 'block'; errEl.style.display = 'none'; resEl.style.display = 'none';
+  if (btnEl) btnEl.disabled = true;
+  try {
+    const needs = PRO_SERVICE_IDS.has(id) ? 'pro' : null;
+    const result = await ai(prompt, needs ? { needs } : {});
+    outEl.textContent = result;
+    resEl.style.display = 'block';
+    saveHist(svcName, result);
+    // تتبع الاستخدام (في الخلفية، لا يوقف الخدمة)
+    trackServiceUse(id, svcName);
+  } catch (e) {
+    handleAiError(e, errEl);
+  } finally {
+    loadEl.style.display = 'none';
+    if (btnEl) btnEl.disabled = false;
+  }
+}
+
+// ========== تتبع استخدام الخدمات ==========
+function trackServiceUse(serviceId, serviceName) {
+  try {
+    fetch(SB_URL + '/functions/v1/ai', {
+      method: 'POST',
+      headers: Object.assign(
+        { 'Content-Type': 'application/json', 'apikey': SB_KEY },
+        session?.access_token ? { 'Authorization': 'Bearer ' + session.access_token } : {}
+      ),
+      body: JSON.stringify({
+        action: 'track_service',
+        service_id: serviceId,
+        service_name: serviceName
+      })
+    }).catch(() => {});
+  } catch(_) {}
+}
+
+// ========== SERVICES ==========
+function runDesc() {
+  const name = document.getElementById('d-name').value.trim();
+  if (!name) { showToast(M('msg_prod')); return; }
+  const det = document.getElementById('d-det').value.trim();
+  const dl = document.getElementById('d-lang').value;
+  const tone = document.getElementById('d-tone').value;
+  const toneMap = { pro: 'احترافي ومقنع', friendly: 'ودي وقريب', luxury: 'فاخر وحصري', simple: 'بسيط ومباشر' };
+  const langNames = { ar: 'العربية', fr: 'الفرنسية (French)', en: 'الإنجليزية (English)' };
+  run('d', `اكتب وصف منتج تجاري احترافي باللغة ${langNames[dl]} بأسلوب ${toneMap[tone]}.\nاسم المنتج: ${name}\n${det ? 'تفاصيل: ' + det : ''}\nاكتب 3-5 جمل جذابة تبرز مميزات المنتج وتحفز المشتري. لا تضف مقدمة أو تعليق.`, '✍️ وصف المنتج');
+}
+
+function runTr() {
+  const text = document.getElementById('tr-in').value.trim();
+  if (!text) { showToast(M('msg_text')); return; }
+  const from = document.getElementById('tr-from').value;
+  const allLangs = [
+    { id:'tr-ar', name:'العربية (Arabic)' },
+    { id:'tr-fr', name:'الفرنسية (French)' },
+    { id:'tr-en', name:'الإنجليزية (English)' },
+    { id:'tr-es', name:'الإسبانية (Spanish)' },
+    { id:'tr-de', name:'الألمانية (German)' },
+    { id:'tr-it', name:'الإيطالية (Italian)' },
+    { id:'tr-pt', name:'البرتغالية (Portuguese)' },
+    { id:'tr-tr', name:'التركية (Turkish)' },
+    { id:'tr-zh', name:'الصينية (Chinese)' },
+    { id:'tr-ru', name:'الروسية (Russian)' },
+  ];
+  const toLangs = allLangs.filter(l => {
+    const el = document.getElementById(l.id);
+    return el && el.checked;
+  }).map(l => l.name);
+  if (!toLangs.length) { showToast(M('msg_lang')); return; }
+  const fromNames = { ar:'العربية', fr:'الفرنسية', en:'الإنجليزية', es:'الإسبانية', de:'الألمانية', it:'الإيطالية', pt:'البرتغالية', tr:'التركية', zh:'الصينية', ru:'الروسية' };
+  run('tr', `أنت مترجم محترف متخصص في التجارة الإلكترونية.\nترجم النص التالي من ${fromNames[from]} إلى هذه اللغات: ${toLangs.join(' · ')}.\nالنص: "${text}"\nقدّم كل ترجمة في فقرة منفصلة مع اسم اللغة كعنوان قبلها. ترجمة طبيعية واحترافية مناسبة للتجارة الإلكترونية. لا تضف تعليقات إضافية.`, '🌍 الترجمة');
+}
+
+function runSEO() {
+  const store = document.getElementById('seo-store').value.trim();
+  if (!store) { showToast(M('msg_store')); return; }
+  const cat = document.getElementById('seo-cat').value.trim();
+  const sl = document.getElementById('seo-lang').value;
+  const langNames = { ar: 'العربية', fr: 'الفرنسية', en: 'الإنجليزية' };
+  run('seo', `أنت خبير SEO. قدّم تحليل SEO احترافي باللغة ${langNames[sl]}:\nالمتجر: ${store}\n${cat ? 'التصنيف: ' + cat : ''}\nقدّم:\n1. العنوان (Title Tag) - أقل من 60 حرف\n2. الوصف الميتا - 150-160 حرف\n3. 10 كلمات مفتاحية\n4. 3 نصائح SEO سريعة\nابدأ مباشرة بالنتائج.`, '🔍 SEO');
+}
+
+function runSocial() {
+  const prod = document.getElementById('so-prod').value.trim();
+  if (!prod) { showToast(M('msg_camp')); return; }
+  const plat = document.getElementById('so-plat').value;
+  const goal = document.getElementById('so-goal').value;
+  const sl = document.getElementById('so-lang').value;
+  const platMap = { instagram: 'Instagram', facebook: 'Facebook', tiktok: 'TikTok', all: 'Instagram وFacebook وTikTok' };
+  const goalMap = { sell: 'زيادة المبيعات', engage: 'تفاعل الجمهور', brand: 'بناء العلامة التجارية', offer: 'إعلان عرض خاص' };
+  const langNames = { ar: 'العربية', fr: 'الفرنسية', en: 'الإنجليزية' };
+  run('so', `اكتب منشور سوشيال ميديا احترافي باللغة ${langNames[sl]} لمنصة ${platMap[plat]} بهدف ${goalMap[goal]}.\nالمنتج/الحملة: ${prod}\nاكتب منشوراً جذاباً مع هاشتاقات مناسبة وكول تو أكشن. لا تضف مقدمة.`, '📱 سوشيال ميديا');
+}
+
+function runEmail() {
+  const store = document.getElementById('em-store').value.trim();
+  if (!store) { showToast(M('msg_store')); return; }
+  const type = document.getElementById('em-type').value;
+  const det = document.getElementById('em-det').value.trim();
+  const sl = document.getElementById('em-lang').value;
+  const typeMap = { promo: 'بريد ترويجي لعرض خاص', welcome: 'ترحيب بعميل جديد', abandon: 'استرداد سلة متروكة', followup: 'متابعة بعد الشراء', newprod: 'إطلاق منتج جديد' };
+  const langNames = { ar: 'العربية', fr: 'الفرنسية', en: 'الإنجليزية' };
+  run('em', `اكتب ${typeMap[type]} باللغة ${langNames[sl]} لمتجر ${store}.\n${det ? 'التفاصيل: ' + det : ''}\nاكتب: سطر الموضوع + نص البريد كاملاً مع كول تو أكشن واضح. ابدأ مباشرة.`, '📧 البريد التسويقي');
+}
+
+function runReply() {
+  const msg = document.getElementById('re-msg').value.trim();
+  if (!msg) { showToast(M('msg_cmsg')); return; }
+  const type = document.getElementById('re-type').value;
+  const sl = document.getElementById('re-lang').value;
+  const typeMap = { helpful: 'ودي ومساعد', apology: 'اعتذار مع حل', refund: 'طلب استرداد', delay: 'تأخير شحن', complaint: 'شكوى عامة' };
+  const langNames = { ar: 'العربية', fr: 'الفرنسية', en: 'الإنجليزية' };
+  run('re', `أنت موظف خدمة عملاء محترف. اكتب رداً ${typeMap[type]} باللغة ${langNames[sl]} على رسالة العميل التالية:\n"${msg}"\nاجعل الرد مهنياً وإيجابياً ومحدداً. لا تضف مقدمة.`, '💬 ردود العملاء');
+}
+
+function runProducts() {
+  const raw = document.getElementById('pr2-raw').value.trim();
+  if (!raw) { showToast(M('msg_pinfo')); return; }
+  const type = document.getElementById('pr2-type').value;
+  const sl = document.getElementById('pr2-lang').value;
+  const langNames = { ar: 'العربية', fr: 'الفرنسية', en: 'الإنجليزية' };
+  run('pr2', `أنت مساعد متجر إلكتروني. نظّم المعلومات التالية لمنتج على منصة ${type} باللغة ${langNames[sl]}:\n${raw}\nقدّم: اسم المنتج · الوصف · السعر · التصنيف · الكلمات المفتاحية · ملاحظات الشحن. نسّق النتيجة بشكل واضح ومنظم.`, '📦 إدخال المنتجات');
+}
+
+function runLanding() {
+  const prod = document.getElementById('lp-prod').value.trim();
+  if (!prod) { showToast(M('msg_prod')); return; }
+  const aud = document.getElementById('lp-aud').value.trim();
+  const price = document.getElementById('lp-price').value.trim();
+  const sl = document.getElementById('lp-lang').value;
+  const langNames = { ar: 'العربية', fr: 'الفرنسية', en: 'الإنجليزية' };
+  run('lp', `اكتب محتوى صفحة هبوط (Landing Page) باللغة ${langNames[sl]} لـ:\nالمنتج: ${prod}\n${aud ? 'الجمهور: ' + aud : ''}${price ? '\nالسعر: ' + price : ''}\nاكتب:\n1. العنوان الرئيسي\n2. العنوان الفرعي\n3. 3 مشاكل يحلها المنتج\n4. 5 مميزات رئيسية\n5. دليل اجتماعي (شهادات وهمية)\n6. كول تو أكشن قوي\nابدأ مباشرة.`, '🏠 صفحة الهبوط');
+}
+
+function runAds() {
+  const prod = document.getElementById('ad2-prod').value.trim();
+  if (!prod) { showToast(M('msg_p')); return; }
+  const plat = document.getElementById('ad2-plat').value;
+  const goal = document.getElementById('ad2-goal').value;
+  const sl = document.getElementById('ad2-lang').value;
+  const langNames = { ar: 'العربية', fr: 'الفرنسية', en: 'الإنجليزية' };
+  run('ad2', `اكتب نص إعلان ${plat} باللغة ${langNames[sl]} بهدف ${goal}.\nالمنتج: ${prod}\nاكتب: العنوان الرئيسي (30 حرف) + العنوان الثانوي + النص الإعلاني + كول تو أكشن. إذا كانت المنصة متعددة، افصل كل منصة بوضوح.`, '📢 الإعلانات');
+}
+
+function runReport() {
+  const data = document.getElementById('rp-data').value.trim();
+  if (!data) { showToast(M('msg_sales')); return; }
+  const type = document.getElementById('rp-type').value;
+  const sl = document.getElementById('rp-lang').value;
+  const typeMap = { monthly: 'شهري', weekly: 'أسبوعي', product: 'تحليل منتج', compare: 'مقارنة فترتين' };
+  const langNames = { ar: 'العربية', fr: 'الفرنسية', en: 'الإنجليزية' };
+  run('rp', `أنت محلل تجارة إلكترونية. حلّل البيانات التالية وقدّم تقرير ${typeMap[type]} باللغة ${langNames[sl]}:\n${data}\nقدّم: ملخص الأداء · نقاط القوة · نقاط الضعف · 5 توصيات عملية للتحسين.`, '📊 تقرير المبيعات');
+}
+
+function runNaming() {
+  const cat = document.getElementById('nm-cat').value.trim();
+  if (!cat) { showToast(M('msg_ptype')); return; }
+  const aud = document.getElementById('nm-aud').value.trim();
+  const style = document.getElementById('nm-style').value;
+  const nl = document.getElementById('nm-lang').value;
+  const styleMap = { luxury: 'فاخر ومميز', fun: 'مرح وحيوي', trust: 'موثوق وكلاسيكي', modern: 'عصري وبسيط' };
+  const langNames = { ar: 'عربية', fr: 'فرنسية', en: 'إنجليزية', mix: 'مزيج من اللغات' };
+  run('nm', `اقترح 10 أسماء متجر إلكتروني ${langNames[nl]} بطابع ${styleMap[style]} لبيع ${cat}${aud ? ' للجمهور: ' + aud : ''}.\nلكل اسم: الاسم + معناه أو سبب اختياره + هل النطاق (.com) متاح غالباً. نسّق النتيجة بشكل واضح.`, '🏷️ تسمية المتجر');
+}
+
+// ========== NAVIGATION ==========
+function showScreen(id) {
+  document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+  curScreen = id;
+}
+
+function go(svc) {
+  curScreen = 'app';
+  showScreen('sv-' + svc);
+}
+
+function back() {
+  showScreen('app');
+  nav(curTab);
+}
+
+function nav(tab) {
+  curTab = tab;
+  ['th','thi','tpr','tpf'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.style.display = 'none';
+  });
+  ['bh','bhi','bpr','bpf'].forEach(id => {
+    const el = document.getElementById(id);
+    if(el) el.classList.remove('active');
+  });
+  const tabMap = { h:'th', hi:'thi', pr:'tpr', pf:'tpf' };
+  const btnMap = { h:'bh', hi:'bhi', pr:'bpr', pf:'bpf' };
+  const el = document.getElementById(tabMap[tab]);
+  if(el) el.style.display = 'flex';
+  const btn = document.getElementById(btnMap[tab]);
+  if(btn) btn.classList.add('active');
+  if(tab === 'hi') renderHist();
+  if(tab === 'pr' || tab === 'pf' || tab === 'h') refreshProUI();
+  showScreen('app');
+}
+
+// ========== HISTORY ==========
+function saveHist(svc, result) {
+  hist.unshift({ svc, result: result.slice(0, 300), date: new Date().toLocaleDateString(lang === 'ar' ? 'ar-DZ' : lang) });
+  if (hist.length > 60) hist = hist.slice(0, 60);
+  localStorage.setItem('th', JSON.stringify(hist));
+}
+
+function renderHist() {
+  const el = document.getElementById('hiList');
+  if (!hist.length) {
+    el.innerHTML = '<div class="empty"><div class="e-icon">📋</div><p>لم تستخدم أي خدمة بعد</p></div>';
+    return;
+  }
+  el.innerHTML = hist.map(h => `<div class="hist-item"><div class="hist-top"><span class="hist-svc">${h.svc}</span><span class="hist-date">${h.date}</span></div><div class="hist-prev">${h.result}</div></div>`).join('');
+}
+
+function clearHist() {
+  if (!hist.length) { showToast(M('msg_empty')); return; }
+  hist = [];
+  localStorage.setItem('th', JSON.stringify(hist));
+  renderHist();
+  showToast(M('msg_cleared'));
+}
+
+// ========== UTILS ==========
+function cp(id) {
+  const el = document.getElementById(id);
+  if (!el) return;
+  navigator.clipboard.writeText(el.textContent).then(() => showToast(M('msg_copied'))).catch(() => {
+    const t = document.createElement('textarea');
+    t.value = el.textContent;
+    document.body.appendChild(t); t.select(); document.execCommand('copy'); document.body.removeChild(t);
+    showToast(M('msg_copied'));
+  });
+}
+
+function showToast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('on');
+  setTimeout(() => t.classList.remove('on'), 2200);
+}
+
+// ========== AUTH (Supabase) ==========
+let authMode  = 'login';
+let session   = JSON.parse(localStorage.getItem('tajer_session') || 'null');
+let profile   = JSON.parse(localStorage.getItem('tajer_profile') || 'null');
+
+function sbHeaders(withAuth) {
+  const h = { 'Content-Type': 'application/json', 'apikey': SB_KEY };
+  h['Authorization'] = 'Bearer ' + ((withAuth && session?.access_token) ? session.access_token : SB_KEY);
+  return h;
+}
+
+function openAuth() {
+  if (session) { nav('pf'); showToast(M('msg_logged')); return; }
+  prevScreenForAuth = 'app';
+  showScreen('sv-auth');
+  setAuthMode('login');
+}
+
+let prevScreenForAuth = 'app';
+
+function setAuthMode(mode) {
+  authMode = mode;
+  document.getElementById('tabLogin').classList.toggle('active', mode === 'login');
+  document.getElementById('tabSignup').classList.toggle('active', mode === 'signup');
+  const t = I18N[lang] || I18N.ar;
+  document.getElementById('au-btn').textContent = mode === 'login' ? (t['au-btn'] || '🔓 دخول') : (t['au-btn2'] || '✨ إنشاء الحساب');
+  document.getElementById('au-pass').autocomplete = mode === 'login' ? 'current-password' : 'new-password';
+  document.getElementById('au-err').style.display = 'none';
+  document.getElementById('au-ok').style.display  = 'none';
+}
+
+async function doAuth() {
+  const email = document.getElementById('au-email').value.trim();
+  const pass  = document.getElementById('au-pass').value;
+  const errEl = document.getElementById('au-err');
+  const okEl  = document.getElementById('au-ok');
+  const loadEl= document.getElementById('au-load');
+  const btnEl = document.getElementById('au-btn');
+  errEl.style.display = 'none'; okEl.style.display = 'none';
+
+  if (!email || !email.includes('@')) { errEl.textContent = M('msg_bademail'); errEl.style.display='block'; return; }
+  if (pass.length < 6) { errEl.textContent = M('msg_shortpass'); errEl.style.display='block'; return; }
+
+  loadEl.style.display = 'block'; btnEl.style.display = 'none';
+
+  try {
+    // إنشاء حساب: يُنشأ مؤكَّداً مباشرة على الخادم (بلا بريد تأكيد)
+    if (authMode === 'signup') {
+      const rs = await fetch(SB_URL + '/functions/v1/signup', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Authorization': 'Bearer ' + SB_KEY },
+        body: JSON.stringify({ email, password: pass })
+      });
+      const ds = await rs.json().catch(() => ({}));
+      if (!rs.ok) {
+        errEl.textContent = ds.error === 'email_exists'  ? M('msg_exists')
+                          : ds.error === 'weak_password' ? M('msg_shortpass')
+                          : ds.error === 'bad_email'     ? M('msg_bademail')
+                          : M('msg_autherr');
+        errEl.style.display = 'block';
+        return;
+      }
+    }
+
+    // تسجيل الدخول (بعد الإنشاء مباشرة أو للحساب الموجود)
+    const r = await fetch(SB_URL + '/auth/v1/token?grant_type=password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY },
+      body: JSON.stringify({ email, password: pass })
+    });
+    const d = await r.json();
+
+    if (!r.ok || !d.access_token) {
+      const code = (d.error_code || d.error || d.msg || '').toString();
+      errEl.textContent = /invalid_credentials|Invalid login/i.test(code) ? M('msg_wrongcreds') : M('msg_autherr');
+      errEl.style.display = 'block';
+      return;
+    }
+
+    session = { access_token: d.access_token, refresh_token: d.refresh_token, user: d.user };
+    localStorage.setItem('tajer_session', JSON.stringify(session));
+    await loadProfile();
+    loadUsage();
+    showToast(M('msg_welcome'));
+    back();
+    nav('pf');
+  } catch (e) {
+    errEl.textContent = M('msg_err'); errEl.style.display = 'block';
+  } finally {
+    loadEl.style.display = 'none'; btnEl.style.display = 'block';
+  }
+}
+
+// ---------- استعادة كلمة السر برمز داخل التطبيق ----------
+let fgEmail = '', fgSession = null;
+
+function openForgot() {
+  fgEmail = ''; fgSession = null;
+  document.getElementById('fg-email').value = (document.getElementById('au-email').value || '').trim();
+  document.getElementById('fg-err').style.display = 'none';
+  fgStep(1);
+  showScreen('sv-forgot');
+}
+
+function backFromForgot() { showScreen('sv-auth'); }
+
+function fgStep(n) {
+  [1,2].forEach(i => {
+    const el = document.getElementById('fgStep' + i);
+    if (el) el.style.display = (i === n) ? 'block' : 'none';
+  });
+  const t = I18N[lang] || I18N.ar;
+  document.getElementById('fg-sub').textContent = n === 1 ? (t['fg-s1'] || '') : (t['fg-s2'] || '');
+  document.getElementById('fg-err').style.display = 'none';
+}
+
+function fgBusy(on, btnId) {
+  document.getElementById('fg-load').style.display = on ? 'block' : 'none';
+  const b = document.getElementById(btnId);
+  if (b) b.style.display = on ? 'none' : 'block';
+}
+
+function fgError(msg) {
+  const e = document.getElementById('fg-err');
+  e.textContent = msg;
+  e.style.display = 'block';
+}
+
+// الخطوة 1 — إرسال الرمز
+async function fgSendCode(resend) {
+  const email = document.getElementById('fg-email').value.trim().toLowerCase();
+  if (!email || !email.includes('@')) { fgError(M('msg_bademail')); return; }
+  fgEmail = email;
+  const btn = resend ? 'fg-resend' : 'fg-send';
+  fgBusy(true, btn);
+  document.getElementById('fg-err').style.display = 'none';
+  try {
+    const back = encodeURIComponent(location.origin + location.pathname);
+    const r = await fetch(SB_URL + '/auth/v1/recover?redirect_to=' + back, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY },
+      body: JSON.stringify({ email })
+    });
+    if (!r.ok && r.status !== 200) {
+      const d = await r.json().catch(() => ({}));
+      if (/rate|limit|seconds/i.test(JSON.stringify(d))) { fgError(M('msg_waitresend')); return; }
+    }
+    document.getElementById('fg-sent').textContent = M('msg_codesent') + ' ' + email;
+    fgStep(2);
+  } catch (e) {
+    fgError(M('msg_err'));
+  } finally { fgBusy(false, btn); }
+}
+
+// ---------- العودة من رابط استعادة كلمة السر ----------
+let recoverySession = null;
+
+function catchRecoveryLink() {
+  const h = location.hash || '';
+  if (!h.includes('access_token') || !h.includes('type=recovery')) return false;
+  const p = new URLSearchParams(h.replace(/^#/, ''));
+  const at = p.get('access_token');
+  if (!at) return false;
+  recoverySession = { access_token: at, refresh_token: p.get('refresh_token') || '' };
+  history.replaceState({}, document.title, location.pathname);   // نظّف الرابط
+  return true;
+}
+
+async function openSetNewPassword() {
+  showScreen('sv-newpass');
+  document.getElementById('np-err').style.display = 'none';
+  document.getElementById('np-1').value = '';
+  document.getElementById('np-2').value = '';
+  try {
+    const r = await fetch(SB_URL + '/auth/v1/user', {
+      headers: { 'apikey': SB_KEY, 'Authorization': 'Bearer ' + recoverySession.access_token }
+    });
+    const d = await r.json();
+    if (d?.email) document.getElementById('np-email').textContent = d.email;
+  } catch (e) {}
+}
+
+async function doSetNewPassword() {
+  const a = document.getElementById('np-1').value;
+  const b = document.getElementById('np-2').value;
+  const errEl = document.getElementById('np-err');
+  const btn   = document.getElementById('np-btn');
+  const load  = document.getElementById('np-load');
+  errEl.style.display = 'none';
+
+  if (a.length < 6) { errEl.textContent = M('msg_shortpass'); errEl.style.display='block'; return; }
+  if (a !== b)      { errEl.textContent = M('msg_nomatch');   errEl.style.display='block'; return; }
+  if (!recoverySession?.access_token) { errEl.textContent = M('msg_linkexp'); errEl.style.display='block'; return; }
+
+  btn.style.display = 'none'; load.style.display = 'block';
+  try {
+    const r = await fetch(SB_URL + '/auth/v1/user', {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json', 'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + recoverySession.access_token
+      },
+      body: JSON.stringify({ password: a })
+    });
+    const d = await r.json();
+    if (!r.ok) { errEl.textContent = M('msg_linkexp'); errEl.style.display = 'block'; return; }
+
+    // ادخل مباشرة بالجلسة الجديدة
+    session = {
+      access_token: recoverySession.access_token,
+      refresh_token: recoverySession.refresh_token,
+      user: d
+    };
+    localStorage.setItem('tajer_session', JSON.stringify(session));
+    recoverySession = null;
+    await loadProfile(); await loadUsage();
+    showToast(M('msg_passok'));
+    showScreen('app'); nav('h');
+  } catch (e) {
+    errEl.textContent = M('msg_err'); errEl.style.display = 'block';
+  } finally { btn.style.display = 'block'; load.style.display = 'none'; }
+}
+
+// ---------- تغيير كلمة السر داخل التطبيق ----------
+function openChangePass() {
+  if (!session) { openAuth(); return; }
+  ['pw-cur','pw-new','pw-new2'].forEach(id => { document.getElementById(id).value = ''; });
+  document.getElementById('pw-err').style.display = 'none';
+  document.getElementById('pw-ok').style.display  = 'none';
+  showScreen('sv-pass');
+}
+
+async function doChangePassword() {
+  const cur   = document.getElementById('pw-cur').value;
+  const next  = document.getElementById('pw-new').value;
+  const next2 = document.getElementById('pw-new2').value;
+  const errEl = document.getElementById('pw-err');
+  const okEl  = document.getElementById('pw-ok');
+  const btn   = document.getElementById('pw-btn');
+  const load  = document.getElementById('pw-load');
+  errEl.style.display = 'none'; okEl.style.display = 'none';
+
+  if (!cur)            { errEl.textContent = M('msg_needcur');   errEl.style.display='block'; return; }
+  if (next.length < 6) { errEl.textContent = M('msg_shortpass'); errEl.style.display='block'; return; }
+  if (next !== next2)  { errEl.textContent = M('msg_nomatch');   errEl.style.display='block'; return; }
+  if (cur === next)    { errEl.textContent = M('msg_samepass');  errEl.style.display='block'; return; }
+
+  btn.style.display = 'none'; load.style.display = 'block';
+  try {
+    const r = await fetch(SB_URL + '/functions/v1/account', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json', 'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + session.access_token
+      },
+      body: JSON.stringify({ action: 'change_password', current: cur, next })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      errEl.textContent = d.error === 'wrong_current' ? M('msg_wrongcur')
+                        : d.error === 'weak_password' ? M('msg_shortpass')
+                        : d.error === 'same_password' ? M('msg_samepass')
+                        : M('msg_err');
+      errEl.style.display = 'block';
+      return;
+    }
+    // تحديث الجلسة بكلمة السر الجديدة
+    const lr = await fetch(SB_URL + '/auth/v1/token?grant_type=password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY },
+      body: JSON.stringify({ email: session.user?.email, password: next })
+    });
+    const ld = await lr.json().catch(() => ({}));
+    if (ld.access_token) {
+      session = { access_token: ld.access_token, refresh_token: ld.refresh_token, user: ld.user };
+      localStorage.setItem('tajer_session', JSON.stringify(session));
+    }
+    ['pw-cur','pw-new','pw-new2'].forEach(id => { document.getElementById(id).value = ''; });
+    okEl.textContent = M('msg_passok');
+    okEl.style.display = 'block';
+    showToast(M('msg_passok'));
+    setTimeout(() => { back(); nav('pf'); }, 1800);
+  } catch (e) {
+    errEl.textContent = M('msg_err'); errEl.style.display = 'block';
+  } finally { btn.style.display = 'block'; load.style.display = 'none'; }
+}
+
+async function doReset() {
+  const email = document.getElementById('au-email').value.trim();
+  if (!email || !email.includes('@')) { showToast(M('msg_bademail')); return; }
+  try {
+    const back = encodeURIComponent(location.origin + location.pathname);
+    await fetch(SB_URL + '/auth/v1/recover?redirect_to=' + back, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY },
+      body: JSON.stringify({ email })
+    });
+    const okEl = document.getElementById('au-ok');
+    okEl.textContent = M('msg_resetsent'); okEl.style.display = 'block';
+  } catch (e) { showToast(M('msg_err')); }
+}
+
+async function loadProfile() {
+  if (!session?.access_token) return;
+  try {
+    const r = await fetch(SB_URL + '/rest/v1/profiles?select=*&id=eq.' + session.user.id, { headers: sbHeaders(true) });
+    const rows = await r.json();
+    profile = Array.isArray(rows) && rows[0] ? rows[0] : null;
+    localStorage.setItem('tajer_profile', JSON.stringify(profile));
+  } catch (e) {}
+  refreshProUI();
+}
+
+function doLogout() {
+  // مسح محادثات البناء من الذاكرة — محفوظة على الخادم وتُسترجع عند الدخول
+  chatState = { website: { messages: [], started: false }, app: { messages: [], started: false } };
+  _bcLoaded = false;
+  session = null; profile = null;
+  localStorage.removeItem('tajer_session');
+  localStorage.removeItem('tajer_profile');
+  showToast(M('msg_loggedout'));
+  refreshProUI();
+}
+
+// تفعيل الاشتراك برمز — عبر الخادم الآمن
+async function redeemCode(code) {
+  if (!session?.access_token) { showToast(M('msg_needlogin')); openAuth(); return false; }
+  try {
+    const r = await fetch(SB_URL + '/functions/v1/redeem-code', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Authorization': 'Bearer ' + session.access_token },
+      body: JSON.stringify({ code })
+    });
+    const d = await r.json();
+    if (!r.ok || d.error) {
+      if (d.error === 'code_used')      showToast(M('msg_codeused'));
+      else if (d.error === 'invalid_code') showToast(M('msg_badcode'));
+      else showToast(M('msg_err'));
+      return false;
+    }
+    await loadProfile();
+    if (typeof d.remaining === 'number') quotaLeft = d.remaining;
+    if (typeof d.quota === 'number') quotaTotal = d.quota;
+    loadUsage();
+    showToast(d.months >= 12 ? M('msg_year') : M('msg_mon'));
+    return true;
+  } catch (e) { showToast(M('msg_err')); return false; }
+}
+// ========== AUTH END ==========
+
+// ========== PAYMENTS ==========
+let payInfo   = null;
+let payTier   = 'pro';
+let payMethod = 'chargily';
+
+async function payApi(payload) {
+  if (!session?.access_token) throw new Error('LOGIN_REQUIRED');
+  const r = await fetch(SB_URL + '/functions/v1/payments', {
+    method: 'POST',
+    headers: Object.assign(
+      { 'Content-Type': 'application/json', 'apikey': SB_KEY },
+      session?.access_token ? { 'Authorization': 'Bearer ' + session.access_token } : {}
+    ),
+    body: JSON.stringify(payload)
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || r.status);
+  return d;
+}
+
+// فتح شاشة الدفع
+async function openPay(tier) {
+  // تنبيه الـ240 توليدة — لبرو ماكس السنوي فقط
+  try {
+    const w = document.getElementById('payYearlyWarn');
+    if (w) w.style.display = (payTier === 'promax' && billingCycle === 'yearly') ? 'block' : 'none';
+  } catch(_) {}
+  if (!session) { openAuth(); return; }
+  payTier = tier;
+  showScreen('sv-pay');
+  document.getElementById('payErr').style.display = 'none';
+  document.getElementById('payOk').style.display  = 'none';
+  payIntent = null; clearInterval(expireTimer); clearInterval(cardPoll);
+  document.getElementById('cardWaiting').style.display = 'none';
+  document.getElementById('intlWaiting').style.display = 'none';
+  document.getElementById('payTabDzd').style.display  = '';
+  document.getElementById('payTabIntl').style.display = '';
+
+  const t = I18N[lang] || I18N.ar;
+  document.getElementById('pyPlan').textContent  = tier === 'promax' ? (t['pmN'] || 'برو ماكس') : (t['ppN'] || 'برو');
+  document.getElementById('pyCycle').textContent = billingCycle === 'yearly' ? (t['billYearly'] || 'سنوي') : (t['billMonthly'] || 'شهري');
+
+  try {
+    if (!payInfo) payInfo = await payApi({ action: 'info' });
+    const usd = payInfo.prices[tier][billingCycle];
+    const dzd = Math.round(usd * (payInfo.dzd_rate || 135));
+    document.getElementById('pyUsd').textContent = usd + '$';
+    document.getElementById('pyDzd').textContent = '≈ ' + dzd.toLocaleString('en-US') + ' دج';
+    setPayMethod(payMethod);
+    loadMyOrders();
+  } catch (e) { handlePayError(e); }
+}
+
+function setPayMethod(m) {
+  payMethod = m;
+  document.getElementById('payTabDzd').classList.toggle('active',  m === 'chargily');
+  document.getElementById('payTabIntl').classList.toggle('active', m === 'nowpay');
+  document.getElementById('payTabUsdt').classList.toggle('active', m === 'usdt');
+  document.getElementById('payChargily').style.display = m === 'chargily' ? 'block' : 'none';
+  document.getElementById('payIntl').style.display     = m === 'nowpay' ? 'block' : 'none';
+  document.getElementById('payUsdt').style.display     = m === 'usdt' ? 'block' : 'none';
+  if (m === 'usdt' && !payIntent) createIntent();
+
+  if (m === 'nowpay') {
+    const usd = payInfo?.prices?.[payTier]?.[billingCycle] || 0;
+    document.getElementById('payUsdBig').textContent = usd + '$';
+    const soonI = document.getElementById('payIntlSoon');
+    const btnI  = document.getElementById('payIntlBtn');
+    if (!payInfo?.intl_enabled) {
+      soonI.textContent = M('msg_intlsoon');
+      soonI.style.display = 'block';
+      btnI.style.opacity = '.5'; btnI.disabled = true;
+    } else {
+      soonI.style.display = 'none';
+      btnI.style.opacity = '1'; btnI.disabled = false;
+    }
+  }
+  const soon = document.getElementById('payChargilySoon');
+  const btn  = document.getElementById('payChargilyBtn');
+  if (m === 'chargily') {
+    const usd = payInfo?.prices?.[payTier]?.[billingCycle] || 0;
+    const dzd = Math.round(usd * (payInfo?.dzd_rate || 135));
+    document.getElementById('payDzdBig').textContent = dzd.toLocaleString('en-US') + ' دج';
+    if (!payInfo?.card_enabled) {
+      soon.textContent = M('msg_dzdsoon');
+      soon.style.display = 'block';
+      btn.style.opacity = '.5';
+      btn.disabled = true;
+    } else {
+      soon.style.display = 'none';
+      btn.style.opacity = '1';
+      btn.disabled = false;
+    }
+  }
+}
+
+let payIntent = null;
+let expireTimer = null;
+
+// إنشاء طلب بمبلغ فريد
+async function createIntent() {
+  const errEl = document.getElementById('payErr');
+  const okEl  = document.getElementById('payOk');
+  errEl.style.display = 'none'; okEl.style.display = 'none';
+  document.getElementById('payExact').textContent = '…';
+  try {
+    const d = await payApi({ action: 'intent', tier: payTier, cycle: billingCycle });
+    payIntent = d;
+    document.getElementById('payExact').textContent = Number(d.exact_amount).toFixed(2) + ' USDT';
+    document.getElementById('payAddr').textContent  = d.address || M('msg_addrsoon');
+    startExpireTimer(d.expires_at);
+  } catch (e) {
+    document.getElementById('payExact').textContent = '—';
+    handlePayError(e);
+  }
+}
+
+function startExpireTimer(iso) {
+  clearInterval(expireTimer);
+  const el = document.getElementById('payExpire');
+  const end = new Date(iso).getTime();
+  const tick = () => {
+    const left = end - Date.now();
+    if (left <= 0) { clearInterval(expireTimer); el.textContent = M('msg_expired'); return; }
+    const mm = Math.floor(left / 60000), ss = Math.floor((left % 60000) / 1000);
+    el.textContent = '⏳ ' + mm + ':' + String(ss).padStart(2, '0');
+  };
+  tick();
+  expireTimer = setInterval(tick, 1000);
+}
+
+function setUsdtKnowledge(kind) {
+  document.getElementById('usdtTabHave').classList.toggle('active', kind === 'have');
+  document.getElementById('usdtTabNew').classList.toggle('active', kind === 'new');
+  document.getElementById('usdtNewGuide').style.display = kind === 'new' ? 'block' : 'none';
+}
+
+function copyExact() {
+  if (!payIntent) return;
+  const v = Number(payIntent.exact_amount).toFixed(2);
+  navigator.clipboard.writeText(v).then(() => showToast(M('msg_copied'))).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = v; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    showToast(M('msg_copied'));
+  });
+}
+
+function copyAddr() {
+  const txt = (document.getElementById('payAddr').textContent || '').trim();
+  if (!txt || txt === M('msg_addrsoon')) return;
+  navigator.clipboard.writeText(txt).then(() => showToast(M('msg_copied'))).catch(() => {
+    const ta = document.createElement('textarea');
+    ta.value = txt; document.body.appendChild(ta); ta.select();
+    document.execCommand('copy'); document.body.removeChild(ta);
+    showToast(M('msg_copied'));
+  });
+}
+
+let cardPoll = null;
+
+async function payWithCard() {
+  const errEl = document.getElementById('payErr');
+  const btn   = document.getElementById('payChargilyBtn');
+  const load  = document.getElementById('payLoad');
+  const wait  = document.getElementById('cardWaiting');
+  errEl.style.display = 'none';
+  btn.style.display = 'none'; load.style.display = 'block';
+  try {
+    const d = await payApi({ action: 'card_checkout', tier: payTier, cycle: billingCycle });
+    if (d.checkout_url) {
+      window.open(d.checkout_url, '_blank');
+      wait.textContent = M('msg_cardwait');
+      wait.style.display = 'block';
+      startCardPolling('chargily');
+    }
+  } catch (e) {
+    const m = String(e.message || e);
+    errEl.textContent = m === 'card_disabled' ? M('msg_dzdsoon')
+                      : m === 'gateway_error' ? M('msg_gateway')
+                      : M('msg_err');
+    errEl.style.display = 'block';
+  } finally { btn.style.display = 'block'; load.style.display = 'none'; }
+}
+
+async function payIntl() {
+  const errEl = document.getElementById('payErr');
+  const btn   = document.getElementById('payIntlBtn');
+  const load  = document.getElementById('payLoad');
+  const wait  = document.getElementById('intlWaiting');
+  errEl.style.display = 'none';
+  btn.style.display = 'none'; load.style.display = 'block';
+  try {
+    const d = await payApi({ action: 'intl_checkout', tier: payTier, cycle: billingCycle });
+    if (d.checkout_url) {
+      window.open(d.checkout_url, '_blank');
+      wait.textContent = M('msg_cardwait');
+      wait.style.display = 'block';
+      startCardPolling('nowpay');
+    }
+  } catch (e) {
+    const m = String(e.message || e);
+    errEl.textContent = m === 'intl_disabled'  ? M('msg_intlsoon')
+                      : m === 'gateway_error'  ? M('msg_gateway')
+                      : M('msg_err');
+    errEl.style.display = 'block';
+  } finally { btn.style.display = 'block'; load.style.display = 'none'; }
+}
+
+// متابعة حالة الدفع تلقائياً
+function startCardPolling(method) {
+  clearInterval(cardPoll);
+  let tries = 0;
+  cardPoll = setInterval(async () => {
+    tries++;
+    if (tries > 100) { clearInterval(cardPoll); return; }
+    try {
+      const d = await payApi({ action: 'gw_status', method: method || 'chargily' });
+      if (d.status === 'paid') {
+        clearInterval(cardPoll);
+        document.getElementById('cardWaiting').style.display = 'none';
+        document.getElementById('intlWaiting').style.display = 'none';
+        const okEl = document.getElementById('payOk');
+        okEl.innerHTML = M('msg_instant');
+        okEl.style.display = 'block';
+        await loadProfile(); await loadUsage();
+        showToast(M('msg_activated'));
+        setTimeout(() => { back(); nav('pr'); }, 2400);
+      }
+    } catch (e) {}
+  }, 6000);
+}
+
+// التحقق من الدفع على الشبكة
+async function confirmPayment() {
+  const errEl = document.getElementById('payErr');
+  const okEl  = document.getElementById('payOk');
+  const btn   = document.getElementById('payUsdtBtn');
+  const load  = document.getElementById('payLoad');
+  errEl.style.display = 'none'; okEl.style.display = 'none';
+  btn.style.display = 'none'; load.style.display = 'block';
+  try {
+    const d = await payApi({ action: 'confirm' });
+    if (d.ok) {
+      clearInterval(expireTimer);
+      okEl.innerHTML = payTier === 'builds_topup'
+        ? (I18N[lang]?.['topup-success'] || '✅ تمت إضافة 20 توليداً فوراً!')
+        : M('msg_instant');
+      okEl.style.display = 'block';
+      await loadProfile(); await loadUsage();
+      showToast(M('msg_activated'));
+      setTimeout(() => { back(); if (payTier !== 'builds_topup') nav('pr'); }, 2400);
+    } else {
+      errEl.textContent = d.reason === 'already_claimed' ? M('msg_claimed')
+                        : d.reason === 'chain_error'     ? M('msg_err')
+                        : M('msg_notyet');
+      errEl.style.display = 'block';
+    }
+    loadMyOrders();
+  } catch (e) { handlePayError(e); }
+  finally { btn.style.display = 'block'; load.style.display = 'none'; }
+}
+
+function handlePayError(e) {
+  const m = String(e.message || e);
+  const errEl = document.getElementById('payErr');
+  if (m === 'LOGIN_REQUIRED') { showToast(M('msg_needlogin')); openAuth(); return; }
+  errEl.textContent = m === 'order_pending' ? M('msg_orderpending')
+                    : m === 'tx_required'   ? M('msg_txreq')
+                    : m === 'expired'       ? M('msg_expired')
+                    : m === 'no_intent'     ? M('msg_notyet')
+                    : M('msg_err');
+  errEl.style.display = 'block';
+}
+
+async function loadMyOrders() {
+  try {
+    const d = await payApi({ action: 'my_orders' });
+    const el = document.getElementById('myOrders');
+    if (!d.orders?.length) { el.innerHTML = ''; return; }
+    const t = I18N[lang] || I18N.ar;
+    const badge = { pending: 'badge-pending', paid: 'badge-paid', rejected: 'badge-rejected' };
+    const label = {
+      pending:  M('msg_st_pending'),
+      paid:     M('msg_st_paid'),
+      rejected: M('msg_st_rejected'),
+    };
+    el.innerHTML = '<div class="f-label" style="margin-top:14px;">' + (t['py-myorders'] || 'طلباتي') + '</div>' +
+      d.orders.map(o => `
+        <div class="order-row">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <span>${o.tier === 'promax' ? '👑 برو ماكس' : '👑 برو'} · ${o.amount_usd}$</span>
+            <span class="${badge[o.status] || 'badge-pending'}">${label[o.status] || o.status}</span>
+          </div>
+          <div style="font-size:.7rem;color:var(--muted);margin-top:4px;font-family:'IBM Plex Mono',monospace;">${new Date(o.created_at).toLocaleString(lang === 'ar' ? 'ar-DZ' : lang)}</div>
+        </div>`).join('');
+  } catch (e) {}
+}
+
+// ---------- لوحة المالك ----------
+let adminTab = 'orders';
+let adminSearchTimer = null;
+
+async function openAdmin() {
+  showScreen('sv-admin');
+  setAdminTab('orders');
+  // تحديث تلقائي كل 30 ثانية
+  if (window._adminRefreshTimer) clearInterval(window._adminRefreshTimer);
+  window._adminRefreshTimer = setInterval(() => {
+    const tab = document.querySelector('.bill-btn.active')?.id?.replace('adminTab','')?.toLowerCase();
+    if (tab === 'orders') loadAdminOrders();
+    else if (tab === 'users') loadUsers();
+  }, 30000);
+}
+
+// ========== MERCHANT COMPLAINTS ==========
+async function complaintsApi(payload) {
+  if (!session?.access_token) throw new Error('LOGIN_REQUIRED');
+  const r = await fetch(SB_URL + '/functions/v1/complaints', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY, 'Authorization': 'Bearer ' + session.access_token },
+    body: JSON.stringify(payload)
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || r.status);
+  return d;
+}
+
+function escapeHtmlCx(s) {
+  const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+}
+
+// ---- شاشة التاجر: تقديم شكوى + عرض شكاواه السابقة ----
+function goComplaintForm() {
+  if (!session) { openAuth(); return; }
+  showScreen('sv-complaint');
+  renderComplaintForm();
+}
+
+async function renderComplaintForm() {
+  const root = document.getElementById('cxform-root');
+  root.innerHTML = `<div class="loading" style="margin:30px auto;"><span></span><span></span><span></span></div>`;
+  try {
+    const d = await complaintsApi({ action: 'my_complaints' });
+    const t = I18N[lang] || I18N.ar;
+    let html = '';
+
+    if (d.complaints?.length) {
+      html += `<div class="f-label">${t['cx-mine'] || 'شكاواي السابقة'}</div>`;
+      d.complaints.forEach(c => {
+        const label = { new:'🆕', in_progress:'⏳', resolved:'✅' }[c.status] || '🆕';
+        const statusTxt = t['cx-status-' + c.status] || c.status;
+        html += `<div class="order-row">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+            <strong style="font-size:.82rem;">${escapeHtmlCx(c.subject)}</strong>
+            <span>${label} ${statusTxt}</span>
+          </div>
+          <div style="font-size:.76rem;color:var(--muted);">${escapeHtmlCx(c.message).slice(0, 100)}</div>
+          ${c.admin_reply ? `<div style="margin-top:8px;padding:8px;background:var(--panel2);border-radius:8px;font-size:.78rem;"><b>${t['cx-reply-label'] || 'ردّنا'}:</b> ${escapeHtmlCx(c.admin_reply)}</div>` : ''}
+          <div style="font-size:.64rem;color:var(--muted);margin-top:6px;font-family:'IBM Plex Mono',monospace;">${new Date(c.created_at).toLocaleDateString(lang==='ar'?'ar-DZ':lang)}</div>
+        </div>`;
+      });
+    }
+
+    html += `
+      <div style="background:rgba(147,88,255,.10);border:1px solid rgba(167,120,255,.35);border-radius:var(--r);padding:12px;font-size:.8rem;color:#C77DFF;line-height:1.7;margin-top:${d.complaints?.length ? '16px' : '0'};">
+        ${t['cxform-note'] || 'صف مشكلتك بوضوح، وسيراجعها فريقنا ويردّ عليك هنا في أقرب وقت.'}
+      </div>
+      <div class="f-label" style="margin-top:12px;">${t['cx-subject-label'] || 'عنوان الشكوى'}</div>
+      <input class="f-input" id="cx-subject" type="text" placeholder="${t['cx-subject-ph'] || 'مثال: مشكلة في الدفع'}">
+      <div class="f-label" style="margin-top:10px;">${t['cx-msg-label'] || 'نص الشكوى'}</div>
+      <textarea class="f-input" id="cx-message" rows="7" placeholder="${t['cxform-ph'] || 'اشرح المشكلة بالتفصيل...'}"></textarea>
+      <div class="char-c" id="cx-count">0 / 3000</div>
+      <button class="btn-gold" onclick="submitComplaint()" style="margin-top:12px;">${t['cxform-btn'] || '📨 إرسال الشكوى'}</button>
+      <div id="cx-err" class="err-box" style="display:none;"></div>`;
+
+    root.innerHTML = html;
+    const ta = document.getElementById('cx-message');
+    const cnt = document.getElementById('cx-count');
+    ta.addEventListener('input', () => {
+      if (ta.value.length > 3000) ta.value = ta.value.slice(0, 3000);
+      cnt.textContent = ta.value.length + ' / 3000';
+    });
+  } catch (e) {
+    root.innerHTML = `<div class="err-box">${M('msg_err')}</div>`;
+  }
+}
+
+async function submitComplaint() {
+  const subject = document.getElementById('cx-subject').value.trim();
+  const message = document.getElementById('cx-message').value.trim();
+  const errEl = document.getElementById('cx-err');
+  errEl.style.display = 'none';
+  if (subject.length < 3) { errEl.textContent = M('msg_cxsubject'); errEl.style.display = 'block'; return; }
+  if (message.length < 10) { errEl.textContent = M('msg_cxshort'); errEl.style.display = 'block'; return; }
+  try {
+    await complaintsApi({ action: 'create', subject, message });
+    showToast(M('msg_cxsent'));
+    renderComplaintForm();
+  } catch (e) {
+    errEl.textContent = M('msg_err'); errEl.style.display = 'block';
+  }
+}
+
+// ---- لوحة المالك: قائمة الشكاوى ----
+async function loadAdminComplaints() {
+  const load = document.getElementById('cxAdminLoad');
+  const list = document.getElementById('cxAdminList');
+  load.style.display = 'block';
+  try {
+    const d = await complaintsApi({ action: 'admin_list' });
+    if (!d.complaints?.length) {
+      list.innerHTML = '<div class="empty"><div class="e-icon">📋</div><p>لا توجد شكاوى بعد</p></div>';
+      return;
+    }
+    list.innerHTML = d.complaints.map(c => `
+      <div class="order-row" style="cursor:pointer;" onclick="openAdminComplaint('${c.id}')">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <strong style="font-size:.82rem;">${escapeHtmlCx(c.subject)}</strong>
+          <span class="status-pill status-${c.status === 'in_progress' ? 'discussing' : c.status === 'resolved' ? 'won' : 'new'}">${c.status}</span>
+        </div>
+        <div style="font-size:.76rem;color:var(--muted);">${escapeHtmlCx(c.email || '')}</div>
+        <div style="font-size:.74rem;color:var(--muted);margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">${escapeHtmlCx(c.message).slice(0, 90)}</div>
+        <div style="font-size:.64rem;color:var(--muted);margin-top:4px;font-family:'IBM Plex Mono',monospace;">${new Date(c.created_at).toLocaleString('ar-DZ')}</div>
+      </div>`).join('');
+  } catch (e) {
+    list.innerHTML = `<div class="err-box">${M('msg_err')}</div>`;
+  } finally { load.style.display = 'none'; }
+}
+
+let curComplaintId = null;
+
+async function openAdminComplaint(id) {
+  curComplaintId = id;
+  showScreen('sv-admin-cx');
+  try {
+    const d = await complaintsApi({ action: 'admin_list' });
+    const c = (d.complaints || []).find(x => x.id === id);
+    if (!c) return;
+    document.getElementById('cxEmail').textContent = c.email || '';
+    document.getElementById('cxSubject').textContent = c.subject || '';
+    document.getElementById('cxMessageBox').textContent = c.message || '';
+    document.getElementById('cxStatus').value = c.status;
+    document.getElementById('cxReplyBox').value = c.admin_reply || '';
+    document.getElementById('cxReplySaved').style.display = 'none';
+  } catch (e) { showToast(M('msg_err')); }
+}
+
+async function adminCxSendReply() {
+  const reply = document.getElementById('cxReplyBox').value.trim();
+  const status = document.getElementById('cxStatus').value;
+  try {
+    await complaintsApi({ action: 'admin_reply', id: curComplaintId, reply, status });
+    document.getElementById('cxReplySaved').style.display = 'block';
+    showToast('✓');
+  } catch (e) { showToast(M('msg_err')); }
+}
+
+async function adminCxChangeStatus() {
+  const status = document.getElementById('cxStatus').value;
+  try {
+    await complaintsApi({ action: 'admin_status', id: curComplaintId, status });
+  } catch (e) { showToast(M('msg_err')); }
+}
+// ========== MERCHANT COMPLAINTS END ==========
+
+function adminRefresh() {
+  if (adminTab === 'orders') loadAdminOrders();
+  else if (adminTab === 'complaints') loadAdminComplaints();
+  else { loadUsers(); loadAdminVisits(); }
+}
+
+function setAdminTab(tab) {
+  adminTab = tab;
+  document.getElementById('adminTabOrders').classList.toggle('active', tab === 'orders');
+  document.getElementById('adminTabUsers').classList.toggle('active', tab === 'users');
+  document.getElementById('adminTabComplaints').classList.toggle('active', tab === 'complaints');
+  document.getElementById('adminPaneOrders').style.display     = tab === 'orders'     ? 'block' : 'none';
+  document.getElementById('adminPaneUsers').style.display      = tab === 'users'      ? 'block' : 'none';
+  document.getElementById('adminPaneComplaints').style.display = tab === 'complaints' ? 'block' : 'none';
+  document.getElementById('adminPaneShop') && (document.getElementById('adminPaneShop').style.display = tab === 'shop' ? 'block' : 'none');
+  document.getElementById('adminTabShop') && document.getElementById('adminTabShop').classList.toggle('active', tab === 'shop');
+  if (tab === 'orders') loadAdminOrders();
+  else if (tab === 'complaints') loadAdminComplaints();
+  else if (tab === 'shop') { loadShopAdmin(); loadProductRequests(); }
+  else loadUsers();
+}
+
+function adminSearchDebounce() {
+  clearTimeout(adminSearchTimer);
+  adminSearchTimer = setTimeout(loadUsers, 350);
+}
+
+async function usersApi(payload) {
+  if (!session?.access_token) throw new Error('LOGIN_REQUIRED');
+  const r = await fetch(SB_URL + '/functions/v1/admin-users', {
+    method: 'POST',
+    headers: Object.assign(
+      { 'Content-Type': 'application/json', 'apikey': SB_KEY },
+      session?.access_token ? { 'Authorization': 'Bearer ' + session.access_token } : {}
+    ),
+    body: JSON.stringify(payload)
+  });
+  const d = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(d.error || r.status);
+  return d;
+}
+
+async function adminSetTier(id, tier) {
+  const labels = { free: 'مجاني', pro: 'برو (1 شهر، 500 استخدام)', promax: 'برو ماكس (1 شهر، 1000 استخدام)' };
+  if (!confirm(`تفعيل هذا الحساب كـ ${labels[tier]}؟`)) return;
+  try {
+    await usersApi({ action: 'set_tier', id, tier, months: 1 });
+    showToast('✓ تم التفعيل');
+    loadUsers();
+  } catch (e) { showToast(M('msg_err')); }
+}
+
+async function adminToggleBan(id, banned) {
+  if (!confirm(banned ? 'حظر هذا الحساب؟ لن يستطيع استخدام أي خدمة.' : 'رفع الحظر عن هذا الحساب؟')) return;
+  try {
+    await usersApi({ action: 'ban', id, banned });
+    showToast(banned ? '🚫 تم الحظر' : '✅ رُفع الحظر');
+    loadUsers();
+  } catch (e) { showToast(M('msg_err')); }
+}
+
+async function loadUserOrders(userId, email, containerEl) {
+  containerEl.innerHTML = '<div style="font-size:.75rem;color:var(--muted);padding:8px;">⏳ جاري التحميل...</div>';
+  try {
+    const d = await payApi({ action: 'admin_user_orders', user_id: userId });
+    if (!d.orders?.length) {
+      containerEl.innerHTML = '<div style="font-size:.75rem;color:var(--muted);padding:8px;text-align:center;">لم يضغط على الاشتراك بعد</div>';
+      return;
+    }
+    const stMap = { awaiting: '⏳ ضغط ولم يدفع', paid: '✅ دفع', rejected: '❌ مرفوض', expired: '⏰ انتهت المهلة', pending: '🔍 قيد المراجعة' };
+    const stColor = { awaiting: 'var(--gold)', paid: 'var(--green)', rejected: 'var(--red)', expired: 'var(--muted)', pending: '#3498DB' };
+    const tierN = { pro: 'برو', promax: 'برو ماكس', builds_topup: '⚡ توليدات إضافية' };
+    containerEl.innerHTML = d.orders.map(o => {
+      const dt = new Date(o.created_at);
+      const dateStr = dt.toLocaleDateString('ar-DZ');
+      const timeStr = dt.toLocaleTimeString('ar-DZ', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+      return `<div style="border-top:1px solid var(--line);padding:7px 0;display:flex;justify-content:space-between;align-items:flex-start;gap:8px;">
+        <div>
+          <div style="font-size:.78rem;font-weight:500;color:var(--text);">${tierN[o.tier]||o.tier} · ${o.cycle==='yearly'?'سنوي':'شهري'}</div>
+          <div style="font-size:.68rem;color:var(--muted);font-family:'IBM Plex Mono',monospace;">${dateStr} ${timeStr}</div>
+          ${o.amount_usd ? `<div style="font-size:.68rem;color:var(--muted);">💵 ${o.amount_usd}$ · ${o.method==='usdt'?'₮ USDT':'بطاقة'}</div>` : ''}
+        </div>
+        <span style="font-size:.72rem;font-weight:700;color:${stColor[o.status]||'var(--muted)'};white-space:nowrap;">${stMap[o.status]||o.status}</span>
+      </div>`;
+    }).join('');
+  } catch(e) {
+    containerEl.innerHTML = '<div style="font-size:.75rem;color:var(--red);padding:8px;">خطأ في التحميل</div>';
+  }
+}
+
+async function loadOwnerBalance() {
+  const el = document.getElementById('adminBalance');
+  if (!el) return;
+  el.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px;text-align:center;">💳 جاري قراءة رصيد الذكاء الاصطناعي...</div>';
+  try {
+    const r = await fetch(SB_URL + '/functions/v1/owner-balance', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + (session?.access_token || '') },
+      body: JSON.stringify({}),
+    });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.reason || d.error || 'خطأ');
+
+    const left = d.effective_remaining;
+    if (left === null || left === undefined) {
+      el.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px;text-align:center;">تعذّرت قراءة الرصيد — راجع لوحة OpenRouter</div>';
+      return;
+    }
+
+    const dzd = Math.round(left * 240);
+    // تقدير: التوليدة ≈ 0.25$ · السؤال ≈ 0.01$
+    const builds = Math.floor(left / 0.25);
+
+    let color, icon, msg;
+    if (left < 5)       { color = 'var(--red)';   icon = '🚨'; msg = 'رصيد منخفض جداً — خدمات برو ستتوقف قريباً!'; }
+    else if (left < 15) { color = 'var(--gold)';  icon = '⚠️'; msg = 'الرصيد ينخفض — يُنصح بالشحن'; }
+    else                { color = 'var(--green)'; icon = '✅'; msg = 'الرصيد كافٍ'; }
+
+    el.innerHTML = `
+      <div style="background:rgba(255,255,255,.04);border:1px solid ${color}44;border-radius:12px;padding:12px 14px;">
+        <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;margin-bottom:6px;">
+          <span style="font-size:11.5px;color:var(--muted);">💳 رصيد الذكاء الاصطناعي</span>
+          <span style="font-size:20px;font-weight:800;color:${color};">$${left.toFixed(2)}</span>
+        </div>
+        <div style="font-size:11px;color:var(--muted);line-height:1.8;">
+          ≈ ${dzd.toLocaleString('ar-DZ')} دج · يكفي لحوالي <b style="color:var(--gold-l);">${builds}</b> توليدة<br>
+          ${icon} ${msg}
+        </div>
+        ${left < 15 ? '<a href="https://openrouter.ai/credits" target="_blank" rel="noopener" style="display:block;margin-top:9px;background:rgba(212,160,23,.15);border:1px solid rgba(212,160,23,.35);border-radius:8px;padding:8px;text-align:center;font-size:12px;font-weight:600;color:var(--gold);text-decoration:none;">⚡ اشحن الرصيد الآن</a>' : ''}
+      </div>`;
+  } catch (e) {
+    el.innerHTML = '<div style="font-size:11px;color:var(--muted);padding:8px;text-align:center;">تعذّرت قراءة الرصيد</div>';
+  }
+}
+
+async function loadAdminVisits() {
+  loadOwnerBalance();
+  const el = document.getElementById('adminVisits');
+  if (!el) return;
+  try {
+    const r = await fetch(SB_URL + '/functions/v1/ai', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + (session?.access_token || '') },
+      body: JSON.stringify({ action: 'get_visit_stats' })
+    });
+    const d = await r.json();
+    if (d.error) throw new Error(d.error);
+
+    const n = (v) => Number(v || 0).toLocaleString('ar-DZ');
+
+    // مقارنة اليوم بالأمس
+    const t = Number(d.today || 0), y = Number(d.yesterday || 0);
+    let trend = '';
+    if (y > 0) {
+      const pct = Math.round(((t - y) / y) * 100);
+      trend = pct > 0 ? `<span style="color:var(--green);font-size:.62rem;">▲ ${pct}%</span>`
+            : pct < 0 ? `<span style="color:var(--red);font-size:.62rem;">▼ ${Math.abs(pct)}%</span>`
+            : `<span style="color:var(--muted);font-size:.62rem;">= 0%</span>`;
+    }
+
+    const box = (label, val, color, extra) => `
+      <div style="background:rgba(255,255,255,.04);border:1px solid ${color}33;border-radius:10px;padding:10px 8px;text-align:center;">
+        <div style="font-size:1.15rem;font-weight:800;color:${color};line-height:1.2;">${n(val)}</div>
+        <div style="font-size:.63rem;color:var(--muted);margin-top:3px;">${label}</div>
+        ${extra ? '<div style="margin-top:2px;">' + extra + '</div>' : ''}
+      </div>`;
+
+    // رسم بياني لآخر 14 يوماً
+    const s = Array.isArray(d.series) ? d.series : [];
+    const mx = Math.max(1, ...s.map(x => Number(x.c || 0)));
+    const bars = s.map(x => {
+      const v = Number(x.c || 0);
+      const h = Math.max(2, Math.round((v / mx) * 40));
+      const isToday = x === s[s.length - 1];
+      return `<div title="${x.d}: ${v}" style="flex:1;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;gap:3px;">
+        <div style="width:100%;max-width:14px;height:${h}px;background:${isToday ? 'var(--gold)' : 'rgba(212,160,23,.4)'};border-radius:3px 3px 0 0;"></div>
+        <div style="font-size:.5rem;color:var(--muted);white-space:nowrap;">${x.d.slice(3)}</div>
+      </div>`;
+    }).join('');
+
+    el.innerHTML = `
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-bottom:7px;">
+        ${box('اليوم', d.today, 'var(--gold)', trend)}
+        ${box('آخر 7 أيام', d.week, '#3498DB', '')}
+        ${box('آخر 30 يوماً', d.month, 'var(--green)', '')}
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:7px;margin-bottom:10px;">
+        ${box('آخر سنة', d.year, '#9b59b6', '')}
+        ${box('الإجمالي منذ البداية', d.total, 'var(--text)', '')}
+      </div>
+      <div style="background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:10px;padding:10px 8px 6px;">
+        <div style="font-size:.65rem;color:var(--muted);margin-bottom:8px;">📈 آخر 14 يوماً</div>
+        <div style="display:flex;align-items:flex-end;gap:3px;height:58px;">${bars}</div>
+      </div>`;
+  } catch(e) {
+    el.innerHTML = '<div style="font-size:12px;color:var(--red);padding:10px;text-align:center;">تعذّر تحميل إحصاءات الزيارات</div>';
+  }
+}
+
+async function loadUsers() {
+  loadAdminVisits();
+  const usEl = document.getElementById('usersLastUpdate');
+  if (usEl) usEl.textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar-DZ');
+  const load = document.getElementById('usersLoad');
+  const list = document.getElementById('usersList');
+  load.style.display = 'block';
+  try {
+    const [stats, listRes] = await Promise.all([
+      usersApi({ action: 'stats' }),
+      usersApi({ action: 'list', search: document.getElementById('userSearch').value.trim() })
+    ]);
+
+    document.getElementById('stTotal').textContent = stats.total;
+    document.getElementById('stWeek').textContent  = stats.new_this_week;
+    document.getElementById('stPro').textContent   = stats.pro;
+    document.getElementById('stMax').textContent   = stats.promax;
+
+    const tierLabel = { free: 'مجاني', pro: '👑 برو', promax: '👑 برو ماكس' };
+    const tierColor  = { free: 'var(--muted)', pro: 'var(--gold)', promax: '#C77DFF' };
+
+    if (!listRes.users?.length) {
+      list.innerHTML = '<div class="empty"><div class="e-icon">👥</div><p>لا يوجد مستخدمون</p></div>';
+      return;
+    }
+
+    list.innerHTML = listRes.users.map(u => {
+      const pct = u.quota ? Math.min(100, Math.round((u.used / u.quota) * 100)) : 0;
+      const joined = new Date(u.joined).toLocaleDateString('ar-DZ');
+      const expires = u.expires ? new Date(u.expires).toLocaleDateString('ar-DZ') : '';
+      // عدّاد الأيام المتبقية
+      const dLeft = u.expires ? Math.ceil((new Date(u.expires).getTime() - Date.now()) / 86400000) : null;
+      const daysBadge = (u.tier !== 'free' && dLeft !== null)
+        ? (dLeft <= 0
+            ? '<span style="font-size:.68rem;font-weight:700;color:var(--red);background:rgba(231,76,60,.12);border:1px solid rgba(231,76,60,.3);padding:2px 8px;border-radius:20px;">⛔ منتهٍ</span>'
+            : dLeft <= 7
+              ? '<span style="font-size:.68rem;font-weight:700;color:var(--gold);background:rgba(212,168,67,.12);border:1px solid rgba(212,168,67,.3);padding:2px 8px;border-radius:20px;">⚠️ متبقٍ ' + dLeft + ' أيام</span>'
+              : '<span style="font-size:.68rem;font-weight:700;color:var(--green);background:rgba(39,174,96,.12);border:1px solid rgba(39,174,96,.3);padding:2px 8px;border-radius:20px;">⏳ متبقٍ ' + dLeft + ' يوماً</span>')
+        : '';
+      const uid = u.id;
+      return `
+        <div class="order-row" style="${u.banned ? 'opacity:.6;border-color:var(--red);' : ''}">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <strong style="font-size:.82rem;word-break:break-all;">${u.email}${u.is_admin ? ' 🛠️' : ''}${u.banned ? ' 🚫' : ''}</strong>
+            <span style="font-size:.7rem;font-weight:900;color:${tierColor[u.tier]};white-space:nowrap;">${tierLabel[u.tier]}</span>
+          </div>
+          <div style="font-size:.74rem;color:var(--muted);margin-bottom:6px;">
+            الاستخدام: ${u.used} / ${u.quota} ${u.tier !== 'free' && expires ? '· ينتهي ' + expires : ''}
+            ${daysBadge ? '<div style="margin-top:6px;">' + daysBadge + '</div>' : ''}
+          </div>
+          <div style="background:var(--ink3);border-radius:999px;height:5px;overflow:hidden;margin-bottom:8px;">
+            <div style="background:${pct > 85 ? 'var(--red)' : 'var(--gold)'};height:100%;width:${pct}%;"></div>
+          </div>
+          <div style="font-size:.66rem;color:var(--muted);margin-bottom:8px;font-family:'IBM Plex Mono',monospace;">انضم ${joined}</div>
+          ${u.is_admin ? '' : `
+          <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;margin-bottom:6px;">
+            <button class="lg-opt-btn" onclick="adminSetTier('${uid}','free')" style="font-size:.68rem;">🆓 مجاني</button>
+            <button class="lg-opt-btn" onclick="adminSetTier('${uid}','pro')" style="font-size:.68rem;">👑 برو</button>
+            <button class="lg-opt-btn" onclick="adminSetTier('${uid}','promax')" style="font-size:.68rem;">👑 ماكس</button>
+          </div>
+          <button class="btn-copy" onclick="adminToggleBan('${uid}', ${!u.banned})" style="font-size:.72rem;padding:7px;${u.banned ? 'color:var(--green);' : 'color:var(--red);'}">${u.banned ? '✅ رفع الحظر' : '🚫 حظر الحساب'}</button>
+          <div style="margin-top:8px;">
+            <button class="btn-copy" style="font-size:.7rem;padding:6px;width:100%;color:#3498DB;" onclick="
+              const box = this.nextElementSibling;
+              if(box.style.display==='none'){box.style.display='block';loadUserOrders('${uid}','${u.email}',box);}
+              else{box.style.display='none';}
+            ">📋 سجل الاشتراك</button>
+            <div style="display:none;background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:0 8px;margin-top:6px;"></div>
+          </div>
+          `}
+        </div>`;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = '<div class="err-box">' + M('msg_err') + '</div>';
+  } finally { load.style.display = 'none'; }
+}
+
+let adminOrdersPage = 0;
+const ORDERS_PER_PAGE = 20;
+
+async function loadAdminOrders(page = 0) {
+  adminOrdersPage = page;
+  const load = document.getElementById('adminLoad');
+  const list = document.getElementById('adminList');
+  load.style.display = 'block'; list.innerHTML = '';
+  try {
+    const d = await payApi({ action: 'admin_list', page, limit: ORDERS_PER_PAGE });
+    if (!d.orders?.length) { list.innerHTML = '<div class="empty"><div class="e-icon">📭</div><p>لا توجد طلبات بعد</p></div>'; return; }
+    const badge = { pending: 'badge-pending', paid: 'badge-paid', rejected: 'badge-rejected' };
+    // تحديث وقت آخر تحديث
+    const upEl = document.getElementById('ordersLastUpdate');
+    if (upEl) upEl.textContent = 'آخر تحديث: ' + new Date().toLocaleTimeString('ar-DZ');
+
+    const stMap = { awaiting:'⏳ ينتظر الدفع', pending:'🔍 قيد المراجعة', paid:'✅ مدفوع', rejected:'❌ مرفوض', expired:'⏰ انتهت المهلة' };
+    const stColor = { awaiting:'var(--gold)', pending:'#3498DB', paid:'var(--green)', rejected:'var(--red)', expired:'var(--muted)' };
+    const methodName = (m) => m === 'usdt' ? '₮ USDT (ترون TRC20)' : m === 'chargily' ? '🇩🇿 بطاقة ذهبية / CIB' : m === 'nowpay' ? '🌐 بطاقة دولية / عملات رقمية' : (m || 'غير محدّدة');
+    const methodColor = (m) => m === 'usdt' ? '#26a17b' : m === 'chargily' ? '#2ecc71' : m === 'nowpay' ? '#3498DB' : 'var(--muted)';
+    const tierName = (t) => t === 'promax' ? '👑 برو ماكس' : t === 'builds_topup' ? '⚡ توليدات' : '👑 برو';
+    // ترقيم الصفحات
+    const pg = document.getElementById('ordersPagination');
+    if (pg) {
+      const total = d.total || d.orders.length;
+      const totalPages = Math.ceil((d.total_all || total) / ORDERS_PER_PAGE);
+      if (totalPages > 1) {
+        pg.innerHTML =
+          `<button onclick="loadAdminOrders(${page-1})" ${page===0?'disabled':''} style="background:rgba(255,255,255,.07);border:1px solid var(--line);border-radius:7px;padding:5px 10px;font-size:11px;color:var(--muted);font-family:Cairo,sans-serif;cursor:pointer;">السابق</button>` +
+          `<span style="font-size:11px;color:var(--muted);padding:5px 8px;">${page+1} / ${totalPages}</span>` +
+          `<button onclick="loadAdminOrders(${page+1})" ${page>=totalPages-1?'disabled':''} style="background:rgba(255,255,255,.07);border:1px solid var(--line);border-radius:7px;padding:5px 10px;font-size:11px;color:var(--muted);font-family:Cairo,sans-serif;cursor:pointer;">التالي</button>`;
+      } else { pg.innerHTML = ''; }
+    }
+
+    list.innerHTML = d.orders.map(o => `
+      <div class="order-row" style="border-right:3px solid ${stColor[o.status]||'var(--line)'};padding-right:8px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px;">
+          <strong style="font-size:.85rem;">${tierName(o.tier)} · ${o.cycle === 'yearly' ? 'سنوي' : 'شهري'}</strong>
+          <span style="font-size:.72rem;font-weight:700;color:${stColor[o.status]||'var(--muted)'};">${stMap[o.status]||o.status}${o.verified_auto ? ' ⚡' : ''}</span>
+        </div>
+        <div style="font-size:.76rem;color:var(--muted);">${o.email || ''}</div>
+        <div style="margin-top:6px;display:flex;align-items:center;gap:7px;flex-wrap:wrap;">
+          <span style="font-size:.72rem;font-weight:700;color:${methodColor(o.method)};background:rgba(255,255,255,.06);border:1px solid ${methodColor(o.method)}33;padding:2px 9px;border-radius:20px;">${methodName(o.method)}</span>
+          <span style="font-size:.78rem;">💵 ${o.amount_usd}$</span>
+          ${o.verified_auto ? '<span style="font-size:.68rem;color:var(--green);">⚡ تحقق تلقائي</span>' : ''}
+        </div>
+        ${o.amount_dzd ? `<div style="font-size:.72rem;color:var(--muted);">🇩🇿 ${Number(o.amount_dzd).toLocaleString('ar-DZ')} دج</div>` : ''}
+        ${o.method === 'usdt' && o.exact_amount && !o.tx_ref ? `<div style="font-size:.72rem;color:var(--gold);margin-top:4px;">المبلغ المنتظر بالضبط: ${o.exact_amount} USDT</div>` : ''}
+        ${o.gateway_ref && o.method !== 'usdt' ? `<div style="font-size:.66rem;color:var(--muted);margin-top:4px;font-family:'IBM Plex Mono',monospace;">مرجع الدفع: ${o.gateway_ref}</div>` : ''}
+        ${o.tx_ref ? `<div class="code-box" style="margin-top:5px;font-size:.6rem;padding:6px;">${o.tx_ref}</div>` : ''}
+        <div style="font-size:.68rem;color:var(--muted);margin-top:4px;font-family:'IBM Plex Mono',monospace;">${new Date(o.created_at).toLocaleString('ar-DZ')}</div>
+        ${(o.status === 'pending' || o.status === 'awaiting') ? `
+          <div class="result-acts" style="margin-top:8px;">
+            <button class="btn-copy" style="background:rgba(52,152,219,.15);color:#3498DB;border-color:rgba(52,152,219,.3);" onclick="recheckOrder('${o.id}')">🔍 فحص</button>
+            <button class="btn-copy" style="background:rgba(39,174,96,.15);color:var(--green);border-color:rgba(39,174,96,.3);" onclick="reviewOrder('${o.id}',true)">✅ تفعيل</button>
+            <button class="btn-copy" style="background:rgba(231,76,60,.12);color:var(--red);border-color:rgba(231,76,60,.3);" onclick="reviewOrder('${o.id}',false)">❌ رفض</button>
+          </div>` : ''}
+      </div>`).join('');
+  } catch (e) {
+    list.innerHTML = '<div class="err-box">' + M('msg_err') + '</div>';
+  } finally {
+    load.style.display = 'none';
+  }
+}
+
+async function recheckOrder(id) {
+  const mName = { usdt: '₮ USDT على شبكة ترون', chargily: '🇩🇿 بطاقة ذهبية / CIB', nowpay: '🌐 بطاقة دولية / عملات رقمية' };
+  showToast('🔍 جارٍ الفحص لدى مزوّد الدفع...');
+  try {
+    const d = await payApi({ action: 'admin_recheck', order_id: id });
+    const via = d.method ? ' · ' + (mName[d.method] || d.method) : '';
+    if (d.ok) {
+      showToast('✅ تأكّد الدفع — تم التفعيل' + (d.detail ? ' (' + d.detail + ')' : ''));
+    } else if (d.already) {
+      showToast('ℹ️ ' + (d.reason || 'مدفوع مسبقاً') + via);
+    } else {
+      showToast('❌ ' + (d.reason || 'لم يتأكّد الدفع') + via);
+    }
+    loadAdminOrders(adminOrdersPage);
+  } catch (e) { showToast('⚠️ تعذّر الفحص — حاول مجدداً'); }
+}
+
+async function reviewOrder(id, approve) {
+  if (!confirm(approve ? 'تفعيل هذا الاشتراك؟' : 'رفض هذا الطلب؟')) return;
+  try {
+    await payApi({ action: 'admin_review', order_id: id, approve });
+    showToast(approve ? '✅ تم التفعيل' : 'تم الرفض');
+    loadAdminOrders();
+  } catch (e) { showToast(M('msg_err')); }
+}
+// ========== PAYMENTS END ==========
+
+// ========== SUBSCRIPTION SYSTEM ==========
+// ⬇️ ضع روابط الدفع هنا بعد إنشائها في Chargily أو Paddle
+
+let billingCycle = 'monthly';
+
+// مستوى الاشتراك الحالي: free / pro / promax
+function userTier() {
+  if (!session || !profile || !profile.pro_until) return 'free';
+  if (new Date(profile.pro_until).getTime() <= Date.now()) return 'free';
+  return profile.tier || 'pro';
+}
+function isPro()    { return userTier() !== 'free'; }
+function isProMax() { return userTier() === 'promax'; }
+// لا تجربة مجانية لخدمات برو/برو ماكس — مقفلة تماماً لغير المشتركين
+function hasFreeTry() { return false; }
+
+function proDaysLeft() {
+  if (!isPro()) return 0;
+  return Math.max(0, Math.ceil((new Date(profile.pro_until).getTime() - Date.now()) / 86400000));
+}
+
+function updateProCountdown() {
+  const pro = isPro();
+  const days = proDaysLeft();
+  const cd = document.getElementById('proCountdown');
+  const sd = document.getElementById('stDays');
+
+  // نص العدّاد حسب ما تبقّى
+  let txt = '', color = '';
+  if (pro) {
+    if (days <= 0)      { txt = '⛔ انتهى اشتراكك — جدّد للمتابعة'; color = 'var(--red)'; }
+    else if (days === 1){ txt = '⚠️ ينتهي اشتراكك غداً — آخر يوم'; color = 'var(--red)'; }
+    else if (days <= 7) { txt = '⚠️ متبقٍ ' + days + ' أيام على انتهاء اشتراكك'; color = 'var(--red)'; }
+    else                { txt = '⏳ متبقٍ ' + days + ' يوماً من اشتراكك'; color = 'var(--green)'; }
+  }
+
+  if (cd) cd.textContent = pro ? txt : '';
+
+  if (sd) {
+    if (pro) { sd.style.display = 'block'; sd.textContent = txt; sd.style.color = color; }
+    else     { sd.style.display = 'none'; }
+  }
+
+  // تنبيه استباقي مرة واحدة في الجلسة عند اقتراب الانتهاء
+  if (pro && days > 0 && days <= 3 && !window._expiryWarned) {
+    window._expiryWarned = true;
+    setTimeout(() => showToast(days === 1
+      ? '⚠️ اشتراكك ينتهي غداً — جدّد لتبقى خدماتك مفتوحة'
+      : '⚠️ متبقٍ ' + days + ' أيام على انتهاء اشتراكك'), 1200);
+  }
+
+  // تاريخ الانتهاء بالتفصيل داخل البانر
+  if (cd && pro && profile?.pro_until) {
+    const dt = new Date(profile.pro_until);
+    cd.innerHTML = txt + '<div style="font-size:.7rem;font-weight:600;opacity:.75;margin-top:3px;">حتى ' +
+      dt.toLocaleDateString('ar-DZ') + '</div>';
+  }
+}
+
+function refreshProUI() {
+  try { refreshAdSense(); } catch (_) {}
+  const pro   = isPro();
+  const max   = isProMax();
+  updateProCountdown();
+  const tt    = I18N[lang] || I18N.ar;
+  const openTxt = '✓ ' + (tt['tagOpen'] || 'مفتوح');
+  // شارات الخدمات المفتوحة — إعلان للمجاني، متاح للمشترك
+  const freeTxt = pro ? ('✓ ' + (tt['tagOpen'] || 'متاح')) : (tt['tagAd'] || 'مجاني');
+  document.querySelectorAll('.free-tag').forEach(el => {
+    el.textContent = freeTxt;
+    el.style.color      = 'var(--green)';
+    el.style.background = 'rgba(39,174,96,.12)';
+  });
+  // شارات خدمات برو — مقفلة تماماً لغير المشتركين
+  document.querySelectorAll('.pro-lock-tag, .pro-open-tag').forEach(el => {
+    if (pro) { el.textContent = openTxt; el.className = 'pro-open-tag'; }
+    else     { el.textContent = '🔒 ' + (tt['tagPro'] || 'برو'); el.className = 'pro-lock-tag'; }
+  });
+  // شارات خدمات برو ماكس — مقفلة تماماً لغير المشتركين
+  document.querySelectorAll('.max-lock-tag, .max-open-tag').forEach(el => {
+    if (max) { el.textContent = openTxt; el.className = 'max-open-tag'; }
+    else     { el.textContent = '👑 ' + (tt['tagMax'] || 'برو ماكس'); el.className = 'max-lock-tag'; }
+  });
+  const t = I18N[lang] || I18N.ar;
+  // لافتة الاشتراك في صفحة الأسعار
+  const banner = document.getElementById('proBanner');
+  if (banner) {
+    banner.style.display = pro ? 'block' : 'none';
+    const sub = document.getElementById('proBannerSub');
+    if (pro && sub) sub.textContent = (t['proBannerSub'] || '') + ' · ' + proDaysLeft() + ' ' + M('msg_days');
+  }
+  // صف الحساب
+  const authRow   = document.getElementById('stAccSub');
+  const logoutRow = document.getElementById('logoutRow');
+  const accName   = document.getElementById('stAcc');
+  const adminRow = document.getElementById('adminRow');
+  if (adminRow) adminRow.style.display = (session && profile?.is_admin) ? 'flex' : 'none';
+  // تعليم الجهاز كجهاز مالك — لمنع احتساب زياراتك ضمن إحصاءات الموقع
+  try {
+    if (session && profile?.is_admin) localStorage.setItem('tj_owner', '1');
+    else if (session) localStorage.removeItem('tj_owner');
+  } catch(_) {}
+  const passRow = document.getElementById('passRow');
+  if (passRow) passRow.style.display = session ? 'flex' : 'none';
+  const cxRow = document.getElementById('cxRow');
+  if (cxRow) cxRow.style.display = session ? 'flex' : 'none';
+  if (session) {
+    if (authRow)   authRow.textContent = session.user?.email || '';
+    if (accName)   accName.textContent = t['stAcc'] || 'حساب تاجر';
+    if (logoutRow) logoutRow.style.display = 'flex';
+  } else {
+    if (authRow)   authRow.textContent = t['stAccSub'] || '';
+    if (logoutRow) logoutRow.style.display = 'none';
+  }
+  // شارة الخطة في الرئيسية والحساب
+  const planLabel = max ? (tt['tierMax'] || 'برو ماكس 👑') : pro ? (tt['tierPro'] || 'تاجر برو 👑') : (tt['wPlan'] || 'الخطة المجانية');
+  const wPlan = document.getElementById('wPlan');
+  if (wPlan) wPlan.textContent = planLabel;
+  const stPV = document.getElementById('stPV');
+  if (stPV) stPV.textContent = planLabel;
+  const pfEmail = document.getElementById('pfEmail');
+  if (pfEmail) pfEmail.textContent = session ? (session.user?.email || '') : (t['pfEmail'] || '');
+  const pfName = document.getElementById('pfName');
+  if (pfName) pfName.textContent = max ? (t['pmN'] || '👑 تاجر برو ماكس') : pro ? (t['ppN'] || '👑 تاجر برو') : (t['pfName'] || 'تاجر');
+  // إخفاء صندوق الترويج للإعلانات عند الاشتراك
+  const adBox = document.getElementById('adBox');
+  if (adBox) adBox.style.display = pro ? 'none' : 'flex';
+  // شارة الرصيد المجاني المتبقي
+  const uTag = document.getElementById('usageTag');
+  if (uTag) {
+    if (!session || quotaLeft === null) {
+      uTag.style.display = 'none';
+    } else if (quotaLeft <= 0) {
+      uTag.style.display = 'inline-block';
+      uTag.textContent = '🔒 ' + (t['quotaOut'] || 'انتهت حصتك');
+      uTag.style.background = 'rgba(231,76,60,.14)';
+      uTag.style.color = '#E74C3C';
+    } else if (pro) {
+      uTag.style.display = 'inline-block';
+      uTag.textContent = '⚡ ' + quotaLeft + ' / ' + (quotaTotal || quotaLeft) + ' ' + (t['quotaLeft'] || 'استخدام متبقٍ');
+      const low = quotaLeft <= Math.max(5, (quotaTotal || 0) * 0.1);
+      uTag.style.background = low ? 'rgba(243,156,18,.14)' : 'rgba(39,174,96,.14)';
+      uTag.style.color = low ? '#F39C12' : 'var(--green)';
+    } else {
+      uTag.style.display = 'inline-block';
+      uTag.textContent = '🎁 ' + quotaLeft + ' ' + (t['freeLeft'] || 'تجربة مجانية');
+      uTag.style.background = 'rgba(243,156,18,.14)';
+      uTag.style.color = '#F39C12';
+    }
+  }
+  // زر الخطة الحالية
+  const curPlan = document.getElementById('curPlan');
+  if (curPlan) curPlan.textContent = pro ? 'الخطة المجانية' : 'الخطة الحالية ✓';
+}
+
+function setBilling(cycle) {
+  billingCycle = cycle;
+  document.getElementById('billMonthly').classList.toggle('active', cycle === 'monthly');
+  document.getElementById('billYearly').classList.toggle('active', cycle === 'yearly');
+  const price = document.getElementById('proPrice');
+  const per   = document.getElementById('pm2');
+  const note  = document.getElementById('proPriceNote');
+  const btn   = document.getElementById('upBtn');
+  const dzd   = document.getElementById('proDzd');
+  const t = I18N[lang] || I18N.ar;
+  const mPrice = document.getElementById('maxPrice');
+  const mPer   = document.getElementById('pm3');
+  const mNote  = document.getElementById('maxPriceNote');
+  const mWarn  = document.getElementById('maxYearlyWarn');
+  const mBtn   = document.getElementById('maxBtn');
+  const mDzd   = document.getElementById('maxDzd');
+  if (cycle === 'yearly') {
+    price.textContent = '120$';
+    per.textContent   = t['perYear'] || ' /سنة';
+    note.style.display = 'block';
+    btn.textContent = t['upBtnY'] || 'اشترك سنوياً — 120$';
+    if (dzd) dzd.textContent = '≈ 28,800 دج /سنة';
+    if (mPrice) mPrice.textContent = '350$';
+    if (mPer)   mPer.textContent   = t['perYear'] || ' /سنة';
+    if (mNote)  mNote.style.display = 'block';
+    if (mBtn)   mBtn.textContent = t['maxBtnY'] || '👑 برو ماكس سنوياً — 350$';
+    if (mDzd)   mDzd.textContent = '≈ 84,000 دج /سنة';
+    if (mWarn)  mWarn.style.display = 'block';
+  } else {
+    price.textContent = '12$';
+    per.textContent   = t['pm2'] || ' /شهر';
+    note.style.display = 'none';
+    btn.textContent = t['upBtn'] || 'اشترك الآن — 12$/شهر';
+    if (dzd) dzd.textContent = '≈ 2,880 دج /شهر';
+    if (mPrice) mPrice.textContent = '30$';
+    if (mPer)   mPer.textContent   = t['pm2'] || ' /شهر';
+    if (mNote)  mNote.style.display = 'none';
+    if (mBtn)   mBtn.textContent = t['maxBtn'] || '👑 اشترك في برو ماكس — 30$/شهر';
+    if (mDzd)   mDzd.textContent = '≈ 7,200 دج /شهر';
+    if (mWarn)  mWarn.style.display = 'none';
+  }
+}
+
+// فتح خدمة برو (أو عرض نافذة الاشتراك)
+// ---------- نظام الإعلانات ----------
+const ADSENSE_SLOT = '2025705131';           // Tajer Interstitial
+
+function goFree(svc) {
+  if (!session) { openAuth(); return; }
+  if (quotaLeft !== null && quotaLeft <= 0) {
+    document.getElementById('subModal').classList.add('open');
+    return;
+  }
+  if (isPro()) { go(svc); return; }   // المشتركون بلا إعلانات
+  adPending = svc;
+  openAdModal();
+}
+
+function openAdModal() {
+  
+
+  adSecs = AD_SECONDS;
+  timer.textContent = adSecs;
+  timer.style.background = 'rgba(0,0,0,.78)';
+  btn.disabled = true;
+
+
+  loadAdUnit();
+
+  clearInterval(adTimer);
+  adTimer = setInterval(() => {
+    adSecs--;
+    if (adSecs > 0) { timer.textContent = adSecs; return; }
+    clearInterval(adTimer);
+    timer.textContent = '✓';
+    timer.style.background = 'rgba(39,174,96,.9)';
+    btn.disabled = false;
+
+  }, 1000);
+}
+
+
+
+
+
+
+
+// ========== PRO MAX BUILDERS — CHAT-BASED ==========
+// خريطة النوع إلى بادئة المعرّفات في الصفحة (website→ws · app→ap)
+const KP = { website: 'ws', app: 'ap' };
+const kid = (kind, suffix) => document.getElementById((KP[kind] || kind) + suffix);
+
+let chatState = {
+  website: { messages: [], started: false },
+  app:     { messages: [], started: false },
+};
+
+const CHAT_STARTER = {
+  website: 'مرحباً! 👋 أخبرني عن الموقع الذي تريد بناءه — ما اسمه؟ وماذا يبيع أو يقدّم؟',
+  app:     'مرحباً! 👋 أخبرني عن التطبيق الذي تريد بناءه — ما اسمه؟ وماذا يفعل؟',
+};
+
+// ===== حفظ محادثات البناء على الخادم =====
+const BC_URL = SB_URL + '/functions/v1/build-chats';
+
+async function bcApi(payload) {
+  if (!session?.access_token) return null;
+  try {
+    const r = await fetch(BC_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + session.access_token,
+      },
+      body: JSON.stringify(payload),
+    });
+    return await r.json();
+  } catch (_) { return null; }
+}
+
+// حفظ مؤجّل حتى لا نرهق الخادم مع كل حرف
+const _bcTimers = {};
+function saveChatSoon(kind) {
+  if (!session?.access_token) return;
+  clearTimeout(_bcTimers[kind]);
+  _bcTimers[kind] = setTimeout(() => {
+    bcApi({ action: 'save', kind, messages: chatState[kind].messages });
+  }, 1200);
+}
+
+// استرجاع المحادثات المحفوظة بعد تسجيل الدخول
+let _bcLoaded = false;
+async function loadSavedChats(force) {
+  if (!session?.access_token) return;
+  if (_bcLoaded && !force) return;
+  _bcLoaded = true;
+  const d = await bcApi({ action: 'load' });
+  if (!d?.chats) return;
+  ['website', 'app'].forEach((k) => {
+    const saved = d.chats[k];
+    if (saved && Array.isArray(saved.messages) && saved.messages.length) {
+      chatState[k].messages = saved.messages;
+      chatState[k].started = true;
+      const box = kid(k, '-chat-msgs');
+      if (box) renderChatMsgs(k);
+    }
+  });
+}
+
+// بدء محادثة جديدة ومسح المحفوظة
+function resetChat(kind) {
+  if (!confirm('بدء محادثة جديدة؟ ستُمسح المحادثة الحالية.')) return;
+  chatState[kind] = { messages: [{ role: 'assistant', content: CHAT_STARTER[kind] }], started: true };
+  renderChatMsgs(kind);
+  const res = kid(kind, '-build-result');
+  if (res) res.style.display = 'none';
+  bcApi({ action: 'clear', kind });
+}
+
+function initChat(kind) {
+  loadSavedChats();          // يسترجع المحادثة المحفوظة إن وُجدت
+  const st = chatState[kind];
+  if (!st.started) {
+    st.started = true;
+    st.messages = [{ role: 'assistant', content: CHAT_STARTER[kind] }];
+  }
+  renderChatMsgs(kind);
+  kid(kind, '-build-result').style.display = 'none';
+}
+
+function renderChatMsgs(kind) {
+  const el = kid(kind, '-chat-msgs');
+  el.innerHTML = chatState[kind].messages.map(m => `
+    <div class="chat-bubble ${m.role === 'user' ? 'user' : 'admin'}">${escapeHtml(m.content)}</div>
+  `).join('');
+  el.scrollTop = el.scrollHeight;
+}
+
+function escapeHtml(s) {
+  const d = document.createElement('div'); d.textContent = s; return d.innerHTML;
+}
+
+// ربط أزرار الإرسال برمجياً — أكثر موثوقية من onclick المضمّن على الهاتف
+function wireChatSend() {
+  [['ws','website'], ['ap','app']].forEach(([p, kind]) => {
+    const btn = document.getElementById(p + '-send-btn');
+    const inp = document.getElementById(p + '-chat-input');
+    if (btn && !btn._wired) {
+      btn._wired = true;
+      const go = (e) => { if (e) { e.preventDefault(); e.stopPropagation(); } sendChatMsg(kind); };
+      btn.addEventListener('click', go);
+      btn.addEventListener('touchend', go, { passive: false });
+    }
+    if (inp && !inp._wired) {
+      inp._wired = true;
+      inp.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.keyCode === 13) { e.preventDefault(); sendChatMsg(kind); }
+      });
+    }
+  });
+}
+document.addEventListener('DOMContentLoaded', wireChatSend);
+setTimeout(wireChatSend, 800);
+setTimeout(wireChatSend, 2500);
+
+async function sendChatMsg(kind) {
+  const input = kid(kind, '-chat-input');
+  if (!input) { showToast('⚠️ تعذّر العثور على حقل الكتابة'); return; }
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = '';
+
+  const st = chatState[kind];
+  st.messages.push({ role: 'user', content: text });
+  renderChatMsgs(kind);
+  saveChatSoon(kind);
+
+  const typing = kid(kind, '-chat-typing');
+  const errEl  = kid(kind, '-chat-err');
+  typing.style.display = 'block'; errEl.style.display = 'none';
+
+  try {
+    const d = await aiCall({ action: 'chat', kind, messages: st.messages, needs: 'promax' });
+    if (typeof d.remaining === 'number') quotaLeft = d.remaining;
+    refreshProUI();
+    st.messages.push({ role: 'assistant', content: d.reply });
+    renderChatMsgs(kind);
+    saveChatSoon(kind);
+  } catch (e) {
+    handleAiError(e, errEl);
+  } finally {
+    typing.style.display = 'none';
+  }
+}
+
+// يلتقط أي خطأ صامت ويعرضه بدل أن يبدو الزر معطّلاً
+window.addEventListener('unhandledrejection', (ev) => {
+  try { showToast('⚠️ ' + String(ev.reason && ev.reason.message || ev.reason || '').slice(0, 90)); } catch(_) {}
+});
+window.addEventListener('error', (ev) => {
+  try {
+    const scr = document.getElementById('sv-website') || document.getElementById('sv-app');
+    if (scr && scr.classList.contains('active')) {
+      showToast('⚠️ ' + String(ev.message || 'خطأ').slice(0, 90));
+    }
+  } catch(_) {}
+});
+
+function extractHtml(text) {
+  let t = String(text || '').trim();
+  const fence = t.match(/```(?:html)?\s*([\s\S]*?)```/i);
+  if (fence) t = fence[1].trim();
+  const i = t.toLowerCase().indexOf('<!doctype');
+  if (i > 0) t = t.slice(i);
+  return t;
+}
+
+function deliverFile(code, codeElId, linkId, filename) {
+  const blob = new Blob([code], { type: 'text/html;charset=utf-8' });
+  const url  = URL.createObjectURL(blob);
+  const link = document.getElementById(linkId);
+  link.href = url;
+  link.download = filename;
+  document.getElementById(codeElId).textContent = code.slice(0, 3000) + (code.length > 3000 ? '\n\n…' : '');
+  window['__' + codeElId] = code;
+}
+
+function openPreview(codeElId) {
+  const code = window['__' + codeElId];
+  if (!code) return;
+  const w = window.open('', '_blank');
+  if (!w) { showToast(M('msg_popup')); return; }
+  w.document.open(); w.document.write(code); w.document.close();
+}
+
+async function finalizeChatBuild(kind) {
+  const st = chatState[kind];
+  if (st.messages.filter(m => m.role === 'user').length < 1) { showToast(kind === 'website' ? M('msg_wsprompt') : M('msg_apprompt')); return; }
+
+  const btn = kid(kind, '-build-btn');
+  const errEl = kid(kind, '-chat-err');
+  const resEl = kid(kind, '-build-result');
+  btn.disabled = true; btn.textContent = '⏳ ' + (I18N[lang]?.['chat-building'] || 'جارٍ البناء...');
+  errEl.style.display = 'none'; resEl.style.display = 'none';
+
+  const convo = st.messages.map(m => `${m.role === 'user' ? 'المستخدم' : 'أنت'}: ${m.content}`).join('\n');
+  const finalInstruction = kind === 'website'
+    ? `فيما يلي محادثة كاملة مع المستخدم حول موقعه:\n\n"""\n${convo}\n"""\n\nبناءً على كل ما ذكره المستخدم في المحادثة، أنشئ الآن موقعاً إلكترونياً كاملاً بملف HTML واحد.\n\nالمتطلبات التقنية الإلزامية:\n1. ملف HTML واحد فقط، كل CSS و JS بداخله.\n2. متجاوب تماماً مع الجوال، أنيق بصرياً مع تدرّجات وظلال ناعمة.\n3. محتوى تسويقي حقيقي مقنع — لا نصوص تجريبية.\n4. وسوم SEO كاملة (title, description, Open Graph).\n5. أيقونات SVG مضمّنة، لا صور خارجية.\n\nأخرج كود HTML فقط بدءاً من <!DOCTYPE html> — بدون أي شرح قبله أو بعده.`
+    : `فيما يلي محادثة كاملة مع المستخدم حول تطبيقه:\n\n"""\n${convo}\n"""\n\nبناءً على كل ما ذكره المستخدم في المحادثة، أنشئ الآن تطبيق ويب تقدّمي (PWA) كاملاً بملف HTML واحد.\n\nالمتطلبات التقنية الإلزامية:\n1. ملف HTML واحد يعمل كتطبيق جوال — شاشة ترحيب، شريط تنقّل سفلي، شاشات متعددة.\n2. manifest مضمّن ليكون قابلاً للتثبيت.\n3. تصميم موجّه للجوال أولاً، ميزات عاملة فعلياً بـ JavaScript.\n4. احفظ البيانات في الذاكرة (متغيرات JS) لا localStorage.\n5. محتوى حقيقي مقنع.\n\nأخرج كود HTML فقط بدءاً من <!DOCTYPE html> — بدون أي شرح قبله أو بعده.`;
+
+  try {
+    const d = await aiCall({ prompt: finalInstruction, max_tokens: 20000, needs: 'promax', engine: 'claude', is_build: true });
+    if (typeof d.remaining === 'number') quotaLeft = d.remaining;
+    refreshProUI();
+    const code = extractHtml(d.text);
+    if (!code || code.length < 200) throw new Error('EMPTY');
+    const fname = kind === 'website' ? 'mon-site.html' : 'mon-app.html';
+    deliverFile(code, (KP[kind]||kind) + '-code', (KP[kind]||kind) + '-dl', fname);
+    resEl.style.display = 'block';
+    if (typeof d.builds_remaining === 'number') {
+      const left = d.builds_remaining;
+      if (left <= 0) {
+        showToast('⛔ نفد رصيد التوليدات — اشترِ رصيداً إضافياً للمتابعة');
+      } else if (left <= 5) {
+        showToast('⚠️ متبقٍ ' + left + ' توليدات فقط من رصيدك');
+      } else if (left <= 20) {
+        showToast('⏳ متبقٍ ' + left + ' توليدة من رصيدك');
+      } else {
+        showToast((I18N[lang]?.['builds-left'] || 'رصيد التوليدات المتبقي:') + ' ' + left);
+      }
+    }
+    saveHist(kind === 'website' ? '🌐 موقع (محادثة)' : '📱 تطبيق (محادثة)', st.messages[1]?.content?.slice(0, 40) || '');
+  } catch (e) {
+    if (String(e.message) === 'BUILD_LIMIT') {
+      showBuildLimitOffer(kind, errEl);
+    } else {
+      handleAiError(e, errEl);
+    }
+  } finally {
+    btn.disabled = false;
+    btn.textContent = '🏗️ ' + (I18N[lang]?.['chat-build-btn']?.replace('🏗️ ', '') || 'ابنِ الملف الآن');
+  }
+}
+
+function showBuildLimitOffer(kind, errEl) {
+  const t = I18N[lang] || I18N.ar;
+  errEl.innerHTML = `
+    <div style="margin-bottom:10px;">${t['msg-build-limit'] || M('msg_build_limit')}</div>
+    <div style="background:rgba(212,160,23,.1);border:1px solid rgba(212,160,23,.35);border-radius:var(--r);padding:12px;">
+      <div style="font-weight:900;color:var(--gold);margin-bottom:6px;">${t['topup-offer-t'] || '⚡ احصل على 20 توليداً إضافياً فوراً'}</div>
+      <div style="font-size:.8rem;color:var(--muted);margin-bottom:10px;">${t['topup-offer-s'] || 'دفعة واحدة 10$ — تُفعَّل تلقائياً خلال ثوانٍ'}</div>
+      <button class="btn-gold" onclick="openBuildsTopup()" style="margin:0;">${t['topup-btn'] || '⚡ اشترِ 20 توليداً — 10$'}</button>
+    </div>`;
+  errEl.style.display = 'block';
+}
+
+function openBuildsTopup() {
+  startCheckoutTopup();
+}
+// ========== PRO MAX BUILDERS END ==========
+
+
+
+
+function goPro(svc) {
+  if (!session) { openAuth(); return; }
+  if (isPro()) { go(svc); return; }
+  pendingProSvc = svc;
+  document.getElementById('subModal').classList.add('open');
+}
+
+// خدمات برو ماكس
+function goMax(svc) {
+  if (!session) { openAuth(); return; }
+  if (isProMax()) {
+    go(svc);
+    if (svc === 'website' || svc === 'app') initChat(svc);
+    return;
+  }
+  pendingProSvc = svc;
+  document.getElementById('maxModal').classList.add('open');
+}
+function closeMaxModal() { document.getElementById('maxModal').classList.remove('open'); }
+let pendingProSvc = null;
+
+function closeSubModal() {
+  document.getElementById('subModal').classList.remove('open');
+}
+
+function startCheckout()    { openPay('pro'); }
+function startCheckoutMax() { openPay('promax'); }
+
+async function startCheckoutTopup() {
+  if (!session) { openAuth(); return; }
+  payTier = 'builds_topup';
+  showScreen('sv-pay');
+  document.getElementById('payErr').style.display = 'none';
+  document.getElementById('payOk').style.display  = 'none';
+  payIntent = null; clearInterval(expireTimer); clearInterval(cardPoll);
+  document.getElementById('cardWaiting').style.display = 'none';
+  document.getElementById('intlWaiting').style.display = 'none';
+
+  const t = I18N[lang] || I18N.ar;
+  document.getElementById('pyPlan').textContent  = t['topup-offer-t'] || '⚡ 20 توليداً إضافياً';
+  document.getElementById('pyCycle').textContent = t['topup-onetime'] || 'دفعة واحدة';
+
+  // إخفاء طرق الدفع الأخرى — USDT فقط لمنتج صغير لمرة واحدة
+  document.getElementById('payTabDzd').style.display  = 'none';
+  document.getElementById('payTabIntl').style.display = 'none';
+
+  try {
+    if (!payInfo) payInfo = await payApi({ action: 'info' });
+    const usd = payInfo.prices.builds_topup || 10;
+    const dzd = Math.round(usd * (payInfo.dzd_rate || 135));
+    document.getElementById('pyUsd').textContent = usd + '$';
+    document.getElementById('pyDzd').textContent = '≈ ' + dzd.toLocaleString('en-US') + ' دج';
+    setPayMethod('usdt');
+    loadMyOrders();
+  } catch (e) { handlePayError(e); }
+}
+
+async function showRestore() {
+  if (!session) { closeSubModal(); showToast(M('msg_needlogin')); openAuth(); return; }
+  const code = prompt(M('msg_entercode'));
+  if (!code) return;
+  const ok = await redeemCode(code);
+  if (ok) closeSubModal();
+}
+// ========== SUBSCRIPTION SYSTEM END ==========
+
+
+
+// ========== PREMIUM SERVICES ==========
+function runProfit() {
+  const buy = parseFloat(document.getElementById('pc-buy').value) || 0;
+  const sell = parseFloat(document.getElementById('pc-sell').value) || 0;
+  if (!buy || !sell) { showToast(M('msg_prices')); return; }
+  const ship = parseFloat(document.getElementById('pc-ship').value) || 0;
+  const ads = parseFloat(document.getElementById('pc-ads').value) || 0;
+  const refuse = parseFloat(document.getElementById('pc-refuse').value) || 0;
+  const orders = parseFloat(document.getElementById('pc-orders').value) || 100;
+  const cur = document.getElementById('pc-currency').value;
+  run('pc', `أنت محلل مالي خبير في التجارة الإلكترونية بالدفع عند الاستلام في المغرب العربي.
+احسب وحلّل بدقة:
+- سعر شراء المنتج: ${buy} ${cur}
+- سعر البيع: ${sell} ${cur}
+- تكلفة الشحن لكل طلب: ${ship} ${cur}
+- تكلفة الإعلان لكل طلب: ${ads} ${cur}
+- نسبة الطلبات المرفوضة/الملغاة: ${refuse}%
+- عدد الطلبات المتوقعة شهرياً: ${orders}
+
+احسب واعرض بشكل منظم وواضح:
+1. الربح الصافي لكل طلب ناجح (مع خصم خسائر الطلبات المرفوضة الموزعة)
+2. إجمالي الربح الشهري المتوقع
+3. هامش الربح %
+4. نقطة التعادل (كم طلب يغطي التكاليف)
+5. تقييم صريح: هل هذا المنتج مربح؟ (ممتاز/جيد/ضعيف/خاسر)
+6. 3 نصائح عملية لزيادة الربح
+استخدم الأرقام بوضوح والعملة ${cur}.`, '💰 حاسبة الربح');
+}
+
+function runScript() {
+  const prod = document.getElementById('vs-prod').value.trim();
+  if (!prod) { showToast(M('msg_prod')); return; }
+  const features = document.getElementById('vs-features').value.trim();
+  const plat = document.getElementById('vs-plat').value;
+  const dur = document.getElementById('vs-dur').value;
+  const style = document.getElementById('vs-style').value;
+  const lang = document.getElementById('vs-lang').value;
+  const platMap = {tiktok:'TikTok', reels:'Instagram Reels', youtube:'YouTube Shorts', facebook:'Facebook'};
+  const styleMap = {hook:'افتتاحية صادمة توقف التمرير', problem:'عرض مشكلة ثم الحل', story:'قصة قصيرة مشوقة', demo:'عرض مباشر للمنتج', ugc:'تجربة شخصية طبيعية (UGC)'};
+  const langMap = {dz:'الدارجة الجزائرية العامية', ar:'العربية الفصحى المبسطة', ma:'الدارجة المغربية', fr:'الفرنسية', en:'الإنجليزية'};
+  run('vs', `أنت خبير إعلانات فيديو قصيرة محترف (TikTok/Reels).
+اكتب سكريبت فيديو إعلاني كامل جاهز للتصوير:
+- المنتج: ${prod}
+${features ? '- المميزات: ' + features : ''}
+- المنصة: ${platMap[plat]}
+- المدة: ${dur} ثانية
+- الأسلوب: ${styleMap[style]}
+- اللغة: ${langMap[lang]}
+
+اكتب السكريبت بهذا التنسيق:
+لكل مشهد: [الثانية] + وصف المشهد المرئي + النص المنطوق + نص يظهر على الشاشة
+ثم أضف:
+- 🎵 اقتراح نوع الموسيقى
+- #️⃣ 5 هاشتاقات مناسبة
+- 💡 نصيحة تصوير واحدة
+اجعل الافتتاحية (أول 3 ثوان) قوية جداً توقف التمرير.`, '🎬 سكريبت الفيديو');
+}
+
+function runWinner() {
+  const country = document.getElementById('wp-country').value;
+  const budget = document.getElementById('wp-budget').value;
+  const niche = document.getElementById('wp-niche').value.trim();
+  const method = document.getElementById('wp-method').value;
+  const budgetMap = {small:'صغيرة أقل من 500 دولار', medium:'متوسطة 500-2000 دولار', large:'كبيرة أكثر من 2000 دولار'};
+  const methodMap = {cod:'الدفع عند الاستلام', online:'الدفع الإلكتروني', both:'الدفع عند الاستلام والإلكتروني'};
+  run('wp', `أنت خبير تجارة إلكترونية متخصص في سوق ${country}.
+اقترح 5 منتجات رابحة للبيع الآن:
+- السوق: ${country}
+- الميزانية: ${budgetMap[budget]}
+- طريقة البيع: ${methodMap[method]}
+${niche ? '- المجال المفضل: ' + niche : '- المجال: مفتوح'}
+
+لكل منتج اذكر:
+1. اسم المنتج ولماذا هو رائج الآن في ${country}
+2. سعر الشراء التقريبي وسعر البيع المقترح
+3. هامش الربح المتوقع
+4. الجمهور المستهدف
+5. أفضل طريقة تسويق له
+ثم اختم بنصيحة ذهبية واحدة للنجاح في سوق ${country}.
+كن واقعياً ومحدداً — منتجات فعلية وليست عامة.`, '🎯 المنتج الرابح');
+}
+function runConfirm() {
+  const prod = document.getElementById('oc-prod').value.trim();
+  if (!prod) { showToast(M('msg_prod')); return; }
+  const type = document.getElementById('oc-type').value;
+  const price = document.getElementById('oc-price').value.trim();
+  const store = document.getElementById('oc-store').value.trim();
+  const lang = document.getElementById('oc-lang').value;
+  const typeMap = {
+    confirm: 'تأكيد طلب جديد وصل للتو — رسالة ترحيبية تؤكد الطلب وتطمئن العميل',
+    noanswer: 'العميل لا يرد على الهاتف — رسالة لطيفة تطلب منه تأكيد الطلب برسالة',
+    remind: 'تذكير بالطلب قبل خروجه للتوصيل — تأكيد أخير للعنوان والاستلام',
+    delivery: 'إشعار أن الطلب سيصل اليوم — تجهيز العميل للاستلام والدفع',
+    refused: 'العميل رفض الاستلام — محاولة أخيرة ذكية لإنقاذ الطلب (عرض خصم أو حل)',
+    thanks: 'شكر بعد الاستلام الناجح + طلب تقييم أو مشاركة'
+  };
+  const langMap = {dz:'الدارجة الجزائرية', ma:'الدارجة المغربية', tn:'الدارجة التونسية', ar:'العربية الفصحى المبسطة', fr:'الفرنسية'};
+  run('oc', `أنت خبير خدمة عملاء في التجارة الإلكترونية بالدفع عند الاستلام في المغرب العربي.
+اكتب 3 صيغ مختلفة لرسالة واتساب:
+- الهدف: ${typeMap[type]}
+- المنتج: ${prod}
+${price ? '- السعر: ' + price : ''}
+${store ? '- اسم المتجر: ' + store : ''}
+- اللغة: ${langMap[lang]}
+
+الشروط:
+- رسائل قصيرة مناسبة للواتساب (2-4 أسطر لكل رسالة)
+- أسلوب إنساني وليس آلياً — كأن صاحب المتجر يكتب بنفسه
+- استخدم إيموجي باعتدال
+- الهدف النهائي: تقليل نسبة رفض الطلبات
+اعرض الصيغ الثلاث مرقمة بوضوح (صيغة 1، صيغة 2، صيغة 3) ليختار التاجر ما يناسبه.`, '📞 تأكيد الطلبات');
+}
+
+function runComments() {
+  const comments = document.getElementById('cm-comments').value.trim();
+  if (!comments) { showToast(M('msg_comments')); return; }
+  const prod = document.getElementById('cm-prod').value.trim();
+  const price = document.getElementById('cm-price').value.trim();
+  const delivery = document.getElementById('cm-delivery').value.trim();
+  const tone = document.getElementById('cm-tone').value;
+  const lang = document.getElementById('cm-lang').value;
+  const toneMap = {friendly:'ودي وقريب من العميل', pro:'احترافي ورسمي', fun:'مرح وخفيف الظل', urgent:'يخلق إلحاحاً ورغبة فورية في الشراء'};
+  const langMap = {dz:'الدارجة الجزائرية', ma:'الدارجة المغربية', tn:'الدارجة التونسية', ar:'العربية الفصحى المبسطة', fr:'الفرنسية'};
+  run('cm', `أنت مدير سوشيال ميديا محترف لمتجر إلكتروني في المغرب العربي.
+رد على كل تعليق من تعليقات العملاء التالية:
+"""
+${comments}
+"""
+معلومات المنتج:
+${prod ? '- المنتج: ' + prod : ''}
+${price ? '- السعر: ' + price : ''}
+${delivery ? '- التوصيل: ' + delivery : ''}
+- أسلوب الرد: ${toneMap[tone]}
+- اللغة: ${langMap[lang]}
+
+الشروط:
+- رد منفصل لكل تعليق (اقتبس التعليق ثم ضع الرد تحته)
+- ردود قصيرة وجذابة تشجع على الطلب
+- إذا سأل عن السعر ولم يُذكر، وجّهه للرسائل الخاصة بذكاء
+- استخدم إيموجي مناسبة
+- كل رد يجب أن يدفع نحو إتمام الشراء`, '💬 ردود التعليقات');
+}
+async function runContent() {
+  const biz = document.getElementById('cp2-biz').value.trim();
+  if (!biz) { showToast(M('msg_biz')); return; }
+  const plat = document.getElementById('cp2-plat').value;
+  const freq = document.getElementById('cp2-freq').value;
+  const goal = document.getElementById('cp2-goal').value;
+  const event = document.getElementById('cp2-event').value.trim();
+  const lang = document.getElementById('cp2-lang').value;
+  const platMap = {instagram:'Instagram', facebook:'Facebook', tiktok:'TikTok', all:'كل المنصات'};
+  const goalMap = {sales:'زيادة المبيعات', followers:'زيادة المتابعين', trust:'بناء الثقة والمصداقية', launch:'إطلاق منتج جديد'};
+  const langMap = {dz:'الدارجة الجزائرية', ar:'العربية الفصحى', ma:'الدارجة المغربية', fr:'الفرنسية', en:'الإنجليزية'};
+
+  const loadEl = document.getElementById('cp2-load');
+  const errEl  = document.getElementById('cp2-err');
+  const resEl  = document.getElementById('cp2-res');
+  const btnEl  = document.getElementById('cp2-btn');
+  loadEl.style.display = 'block'; errEl.style.display = 'none'; resEl.style.display = 'none'; btnEl.disabled = true;
+
+  const prompt = `أنت خبير تسويق سوشيال ميديا للمتاجر الإلكترونية في المغرب العربي.
+أنشئ خطة محتوى لمدة 30 يوماً:
+- النشاط: ${biz}
+- المنصة: ${platMap[plat]}
+- التكرار: ${freq} منشورات في الأسبوع
+- الهدف: ${goalMap[goal]}
+${event ? '- مناسبة قادمة: ' + event : ''}
+- اللغة: ${langMap[lang]}
+
+لكل منشور اكتب بهذا التنسيق المختصر:
+اليوم X | نوع المحتوى | الفكرة | نص جاهز قصير | 3 هاشتاقات
+
+نوّع بين: عرض منتج · قصة عميل · نصيحة مفيدة · خلف الكواليس · سؤال تفاعلي · عرض خاص · مقارنة · شهادة عميل · فيديو قصير · استطلاع.
+ابدأ مباشرة بالخطة بدون مقدمة. اجعل النصوص قصيرة وجاهزة للنسخ.`;
+
+  try {
+    const result = await ai(withUiLang(prompt), { maxTokens: 4000, needs: 'pro' });
+    document.getElementById('cp2-out').textContent = result;
+    resEl.style.display = 'block';
+    saveHist('📅 خطة المحتوى', result.slice(0, 300));
+  } catch(e) {
+    handleAiError(e, errEl);
+  } finally {
+    loadEl.style.display = 'none';
+    btnEl.disabled = false;
+  }
+}
+// ========== PREMIUM SERVICES END ==========
+
+// ========== LOGO DESIGN (secure via Supabase) ==========
+// ---------- تصميم الشعار: تبويبان ----------
+let logoTab = 'manual';
+
+// فتح خدمة الشعار — يبدأ مباشرة بالمحرر اليدوي (الذكاء الاصطناعي معطَّل مؤقتاً)
+function goLogo() {
+  if (!session) { openAuth(); return; }
+  if (quotaLeft !== null && quotaLeft <= 0) {
+    document.getElementById('subModal').classList.add('open');
+    return;
+  }
+  go('logo');
+  initManualLogo();
+  drawLogo();
+}
+
+function setLogoTab(tab) {
+  logoTab = tab;
+  document.getElementById('logoTabAi').classList.toggle('active', tab === 'ai');
+  document.getElementById('logoTabManual').classList.toggle('active', tab === 'manual');
+  document.getElementById('logoPaneAi').style.display     = tab === 'ai' ? 'block' : 'none';
+  document.getElementById('logoPaneManual').style.display = tab === 'manual' ? 'block' : 'none';
+  if (tab === 'manual') { initManualLogo(); drawLogo(); }
+}
+
+// ---- تبويب الذكاء الاصطناعي (توليد صورة حقيقية عبر Gemini) ----
+async function runLogo() {
+  const name = document.getElementById('lg-name').value.trim();
+  if (!name) { showToast(M('msg_brand')); return; }
+  const field = document.getElementById('lg-field').value.trim();
+  const style = document.getElementById('lg-style').value;
+  const color = document.getElementById('lg-color').value;
+
+  const loadEl = document.getElementById('lg-load');
+  const errEl  = document.getElementById('lg-err');
+  const resEl  = document.getElementById('lg-res');
+  const btnEl  = document.getElementById('lg-btn');
+
+  loadEl.style.display = 'block'; errEl.style.display = 'none'; resEl.style.display = 'none'; btnEl.style.display = 'none';
+
+  const prompt = `Professional minimalist logo design for a brand named "${name}"${field ? ', in the ' + field + ' industry' : ''}. Style: ${style}. Color scheme: ${color}. Vector art style, clean lines, centered composition, plain white or transparent background, high quality branding, no text errors, iconic and memorable.`;
+
+  try {
+    if (!session) throw new Error('LOGIN_REQUIRED');
+    const r = await fetch(SB_URL + '/functions/v1/ai', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json', 'apikey': SB_KEY,
+        'Authorization': 'Bearer ' + session.access_token
+      },
+      body: JSON.stringify({ action: 'generate_image', prompt })
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      if (d.error === 'login_required') throw new Error('LOGIN_REQUIRED');
+      if (d.error === 'limit_reached')  throw new Error('LIMIT_REACHED');
+      throw new Error(d.details || d.error || r.status);
+    }
+    if (typeof d.remaining === 'number') quotaLeft = d.remaining;
+    if (typeof d.quota === 'number') quotaTotal = d.quota;
+    refreshProUI();
+
+    const dataUrl = `data:${d.mime_type || 'image/png'};base64,${d.image_base64}`;
+    document.getElementById('lgResult').src    = dataUrl;
+    document.getElementById('lgDownload').href = dataUrl;
+    resEl.style.display = 'block';
+    saveHist('🎨 تصميم الشعار', 'تم تصميم شعار لـ: ' + name);
+  } catch (e) {
+    handleAiError(e, errEl);
+  } finally {
+    loadEl.style.display = 'none'; btnEl.style.display = 'block';
+  }
+}
+
+// ==================================================
+// المحرر اليدوي — نسخة حديثة: أيقونات خطية SVG، تدرّج لوني، لوحات جاهزة، خطوط ذكية
+// ==================================================
+
+// أيقونات خطية (Line Icons) بأسلوب Linear/Notion — تُرسم برمجياً بخطوط ناعمة
+const LOGO_ICON_DRAWERS = {
+  bag: (x,y,s) => { const w=s*0.7,h=s*0.6,t=y-s*0.15;
+    return [[['moveTo',x-w/2,t],['lineTo',x-w/2,t+h],['lineTo',x+w/2,t+h],['lineTo',x+w/2,t],['closePath']],
+            [['moveTo',x-w*0.28,t],['arc',x,t-s*0.02,w*0.28,Math.PI,0,true]]]; },
+  leaf: (x,y,s) => [[['moveTo',x,y+s*0.42],['quadraticCurveTo',x-s*0.5,y+s*0.1,x-s*0.05,y-s*0.42],
+      ['quadraticCurveTo',x+s*0.5,y+s*0.1,x,y+s*0.42],['closePath']],
+      [['moveTo',x-s*0.02,y+s*0.3],['lineTo',x-s*0.02,y-s*0.25]]],
+  bolt: (x,y,s) => [[['moveTo',x+s*0.12,y-s*0.45],['lineTo',x-s*0.28,y+s*0.06],['lineTo',x-s*0.02,y+s*0.06],
+      ['lineTo',x-s*0.12,y+s*0.45],['lineTo',x+s*0.28,y-s*0.1],['lineTo',x+s*0.04,y-s*0.1],['closePath']]],
+  star: (x,y,s) => { const pts=[]; const R=s*0.46, r=s*0.19;
+    for(let i=0;i<10;i++){const rad=i%2===0?R:r; const a=Math.PI/5*i-Math.PI/2; pts.push([x+rad*Math.cos(a), y+rad*Math.sin(a)]);}
+    const cmds=[['moveTo',pts[0][0],pts[0][1]]]; for(let i=1;i<pts.length;i++) cmds.push(['lineTo',pts[i][0],pts[i][1]]); cmds.push(['closePath']);
+    return [cmds]; },
+  crown: (x,y,s) => [[['moveTo',x-s*0.42,y+s*0.22],['lineTo',x-s*0.42,y-s*0.05],['lineTo',x-s*0.2,y+s*0.12],
+      ['lineTo',x,y-s*0.3],['lineTo',x+s*0.2,y+s*0.12],['lineTo',x+s*0.42,y-s*0.05],['lineTo',x+s*0.42,y+s*0.22],['closePath']]],
+  heart: (x,y,s) => [[['moveTo',x,y+s*0.38],['bezierCurveTo',x-s*0.55,y-s*0.05,x-s*0.35,y-s*0.5,x,y-s*0.15],
+      ['bezierCurveTo',x+s*0.35,y-s*0.5,x+s*0.55,y-s*0.05,x,y+s*0.38],['closePath']]],
+  house: (x,y,s) => [[['moveTo',x-s*0.38,y+s*0.35],['lineTo',x-s*0.38,y-s*0.05],['lineTo',x,y-s*0.42],
+      ['lineTo',x+s*0.38,y-s*0.05],['lineTo',x+s*0.38,y+s*0.35],['closePath']],
+      [['moveTo',x-s*0.12,y+s*0.35],['lineTo',x-s*0.12,y+s*0.08],['lineTo',x+s*0.12,y+s*0.08],['lineTo',x+s*0.12,y+s*0.35]]],
+  phone: (x,y,s) => [[['moveTo',x-s*0.22,y-s*0.45],['lineTo',x+s*0.22,y-s*0.45],['arcTo',x+s*0.3,y-s*0.45,x+s*0.3,y-s*0.37,s*0.08],
+      ['lineTo',x+s*0.3,y+s*0.37],['arcTo',x+s*0.3,y+s*0.45,x+s*0.22,y+s*0.45,s*0.08],['lineTo',x-s*0.22,y+s*0.45],
+      ['arcTo',x-s*0.3,y+s*0.45,x-s*0.3,y+s*0.37,s*0.08],['lineTo',x-s*0.3,y-s*0.37],['arcTo',x-s*0.3,y-s*0.45,x-s*0.22,y-s*0.45,s*0.08],['closePath']]],
+  coffee: (x,y,s) => [[['moveTo',x-s*0.32,y-s*0.15],['lineTo',x-s*0.28,y+s*0.35],['lineTo',x+s*0.28,y+s*0.35],
+      ['lineTo',x+s*0.32,y-s*0.15],['closePath']],
+      [['moveTo',x+s*0.32,y-s*0.05],['arc',x+s*0.42,y-s*0.02,s*0.1,-Math.PI*0.6,Math.PI*0.6]]],
+  camera: (x,y,s) => [[['moveTo',x-s*0.4,y-s*0.2],['lineTo',x-s*0.15,y-s*0.2],['lineTo',x-s*0.06,y-s*0.35],
+      ['lineTo',x+s*0.06,y-s*0.35],['lineTo',x+s*0.15,y-s*0.2],['lineTo',x+s*0.4,y-s*0.2],['lineTo',x+s*0.4,y+s*0.3],
+      ['lineTo',x-s*0.4,y+s*0.3],['closePath']],[['moveTo',x+s*0.12,y+s*0.05],['arc',x,y+s*0.05,s*0.14,0,Math.PI*2]]],
+  gem: (x,y,s) => [[['moveTo',x-s*0.4,y-s*0.15],['lineTo',x,y+s*0.42],['lineTo',x+s*0.4,y-s*0.15],
+      ['lineTo',x+s*0.2,y-s*0.42],['lineTo',x-s*0.2,y-s*0.42],['closePath']],
+      [['moveTo',x-s*0.4,y-s*0.15],['lineTo',x+s*0.4,y-s*0.15]],[['moveTo',x,y+s*0.42],['lineTo',x-s*0.2,y-s*0.42]],
+      [['moveTo',x,y+s*0.42],['lineTo',x+s*0.2,y-s*0.42]]],
+  mountain: (x,y,s) => [[['moveTo',x-s*0.42,y+s*0.28],['lineTo',x-s*0.1,y-s*0.32],['lineTo',x+s*0.1,y-s*0.05],
+      ['lineTo',x+s*0.22,y-s*0.22],['lineTo',x+s*0.42,y+s*0.28],['closePath']]],
+  key: (x,y,s) => [[['moveTo',x-s*0.32,y-s*0.05],['arc',x-s*0.32,y-s*0.05,s*0.16,0,Math.PI*2]],
+      [['moveTo',x-s*0.18,y-s*0.05],['lineTo',x+s*0.38,y-s*0.05]],
+      [['moveTo',x+s*0.22,y-s*0.05],['lineTo',x+s*0.22,y+s*0.12]],[['moveTo',x+s*0.36,y-s*0.05],['lineTo',x+s*0.36,y+s*0.12]]],
+  gift: (x,y,s) => [[['moveTo',x-s*0.36,y-s*0.05],['lineTo',x+s*0.36,y-s*0.05],['lineTo',x+s*0.36,y+s*0.4],
+      ['lineTo',x-s*0.36,y+s*0.4],['closePath']],[['moveTo',x-s*0.42,y-s*0.22],['lineTo',x+s*0.42,y-s*0.22],
+      ['lineTo',x+s*0.42,y-s*0.05],['lineTo',x-s*0.42,y-s*0.05],['closePath']],
+      [['moveTo',x,y-s*0.22],['lineTo',x,y+s*0.4]]],
+  rocket: (x,y,s) => [[['moveTo',x,y-s*0.45],['quadraticCurveTo',x+s*0.3,y-s*0.1,x+s*0.18,y+s*0.3],
+      ['lineTo',x-s*0.18,y+s*0.3],['quadraticCurveTo',x-s*0.3,y-s*0.1,x,y-s*0.45],['closePath']],
+      [['moveTo',x-s*0.18,y+s*0.15],['lineTo',x-s*0.4,y+s*0.42]],[['moveTo',x+s*0.18,y+s*0.15],['lineTo',x+s*0.4,y+s*0.42]]],
+  sun: (x,y,s) => { const cmds=[[['moveTo',x+s*0.2,y],['arc',x,y,s*0.2,0,Math.PI*2]]];
+      for(let i=0;i<8;i++){const a=Math.PI/4*i; cmds.push([['moveTo',x+Math.cos(a)*s*0.3,y+Math.sin(a)*s*0.3],
+      ['lineTo',x+Math.cos(a)*s*0.46,y+Math.sin(a)*s*0.46]]);}
+      return cmds; },
+  moon: (x,y,s) => [[['moveTo',x+s*0.15,y-s*0.4],['arc',x,y,s*0.4,-Math.PI*0.45,Math.PI*0.45,true],
+      ['quadraticCurveTo',x+s*0.35,y,x+s*0.15,y-s*0.4],['closePath']]],
+  flower: (x,y,s) => { const cmds=[]; for(let i=0;i<5;i++){const a=Math.PI*2/5*i-Math.PI/2;
+      const px=x+Math.cos(a)*s*0.28, py=y+Math.sin(a)*s*0.28;
+      cmds.push([['moveTo',px,py],['arc',px,py,s*0.18,0,Math.PI*2]]);}
+      cmds.push([['moveTo',x+s*0.08,y],['arc',x,y,s*0.08,0,Math.PI*2]]); return cmds; },
+  shield: (x,y,s) => [[['moveTo',x,y-s*0.42],['lineTo',x+s*0.34,y-s*0.28],['lineTo',x+s*0.34,y+s*0.05],
+      ['quadraticCurveTo',x+s*0.34,y+s*0.35,x,y+s*0.45],['quadraticCurveTo',x-s*0.34,y+s*0.35,x-s*0.34,y+s*0.05],
+      ['lineTo',x-s*0.34,y-s*0.28],['closePath']]],
+  diamond: (x,y,s) => [[['moveTo',x,y-s*0.42],['lineTo',x+s*0.4,y],['lineTo',x,y+s*0.42],['lineTo',x-s*0.4,y],['closePath']]],
+  feather: (x,y,s) => [[['moveTo',x+s*0.28,y-s*0.42],['quadraticCurveTo',x-s*0.3,y-s*0.1,x-s*0.28,y+s*0.42],
+      ['quadraticCurveTo',x+s*0.05,y+s*0.15,x+s*0.28,y-s*0.42],['closePath']],
+      [['moveTo',x+s*0.24,y-s*0.35],['lineTo',x-s*0.22,y+s*0.35]]],
+  paw: (x,y,s) => { const cmds=[[['moveTo',x+s*0.16,y+s*0.1],['arc',x,y+s*0.14,s*0.22,0,Math.PI*2]]];
+      const off=[[-0.28,-0.28],[0.28,-0.28],[-0.42,0.02],[0.42,0.02]];
+      off.forEach(([ox,oy])=>cmds.push([['moveTo',x+ox*s+s*0.1,y+oy*s],['arc',x+ox*s,y+oy*s,s*0.1,0,Math.PI*2]]));
+      return cmds; },
+};
+const LOGO_ICON_KEYS = Object.keys(LOGO_ICON_DRAWERS);
+
+function strokeIconPath(ctx, cmds) {
+  ctx.beginPath();
+  cmds.forEach(seg => {
+    seg.forEach(cmd => {
+      const [op, ...a] = cmd;
+      if (op === 'moveTo') ctx.moveTo(a[0], a[1]);
+      else if (op === 'lineTo') ctx.lineTo(a[0], a[1]);
+      else if (op === 'arc') ctx.arc(a[0], a[1], a[2], a[3], a[4], a[5] || false);
+      else if (op === 'arcTo') ctx.arcTo(a[0], a[1], a[2], a[3], a[4]);
+      else if (op === 'quadraticCurveTo') ctx.quadraticCurveTo(a[0], a[1], a[2], a[3]);
+      else if (op === 'bezierCurveTo') ctx.bezierCurveTo(a[0], a[1], a[2], a[3], a[4], a[5]);
+      else if (op === 'closePath') ctx.closePath();
+    });
+  });
+}
+
+// لوحات ألوان جاهزة (اتجاهات 2026 — دافئة، فاخرة، طبيعية، جريئة)
+const LOGO_PALETTES = [
+  { name: 'ذهبي فاخر',   bg: '#D4A017', bg2: '#F5C842', fg: '#0E0900' },
+  { name: 'أسود أنيق',   bg: '#0E0900', bg2: '#2C2416', fg: '#D4A017' },
+  { name: 'أخضر طبيعي',  bg: '#1B5E3F', bg2: '#4CAF7D', fg: '#F5F5F0' },
+  { name: 'محيطي',       bg: '#0D3B54', bg2: '#2196C4', fg: '#F5F5F0' },
+  { name: 'وردي عصري',   bg: '#D6336C', bg2: '#FF8FAB', fg: '#FFFFFF' },
+  { name: 'أرجواني',     bg: '#4A1B6D', bg2: '#9D4EDD', fg: '#F5F5F0' },
+  { name: 'ترابي دافئ',  bg: '#8B4513', bg2: '#D2A679', fg: '#F5F0E6' },
+  { name: 'أحمر جريء',   bg: '#B71C1C', bg2: '#EF5350', fg: '#FFFFFF' },
+];
+
+const LOGO_SHAPES = ['circle','rounded','square','hexagon','none'];
+const LOGO_LAYOUTS = [
+  { id: 'icon-top',  ar: 'أيقونة فوق' },
+  { id: 'icon-side', ar: 'أيقونة بجانب' },
+  { id: 'text-only', ar: 'نص فقط' },
+];
+const LOGO_FONTS = [
+  { id: 'cairo',    label: 'Cairo',    css: "'Cairo', sans-serif",    scripts: 'ar' },
+  { id: 'tajawal',  label: 'Tajawal',  css: "'Tajawal', sans-serif",  scripts: 'ar' },
+  { id: 'almarai',  label: 'Almarai',  css: "'Almarai', sans-serif",  scripts: 'ar' },
+  { id: 'poppins',  label: 'Poppins',  css: "'Poppins', sans-serif",  scripts: 'en' },
+  { id: 'montserrat', label:'Montserrat', css:"'Montserrat', sans-serif", scripts:'en' },
+  { id: 'playfair', label: 'Playfair', css: "'Playfair Display', serif", scripts: 'en' },
+];
+
+let logoState = {
+  icon: 'bag', shape: 'circle', layout: 'icon-top', fill: 'gradient',
+  bg: '#D4A017', bg2: '#F5C842', fg: '#0E0900', font: 'cairo',
+};
+let logoInited = false;
+
+function isArabicText(t) { return /[\u0600-\u06FF]/.test(t); }
+
+function initManualLogo() {
+  if (logoInited) return;
+  logoInited = true;
+
+  // لوحات الألوان الجاهزة
+  const palGrid = document.getElementById('lgPaletteGrid');
+  palGrid.innerHTML = LOGO_PALETTES.map((p, i) => `
+    <div class="lg-palette-chip${i===0?' active':''}" onclick="pickLogoPalette(${i}, this)"
+         style="min-width:52px;height:52px;border-radius:12px;background:linear-gradient(135deg,${p.bg},${p.bg2});
+         border:2px solid ${i===0?'var(--gold)':'transparent'};flex-shrink:0;cursor:pointer;"></div>
+  `).join('');
+
+  // أيقونات خطية
+  const iconGrid = document.getElementById('lgIconGrid');
+  iconGrid.innerHTML = LOGO_ICON_KEYS.map((k, i) => `
+    <div class="lg-swatch${k==='bag'?' active':''}" data-icon="${k}" onclick="pickLogoIcon('${k}', this)">
+      <svg viewBox="0 0 40 40" width="22" height="22"><g id="icn-${k}-preview"></g></svg>
+    </div>`).join('');
+  // ارسم أيقونات المعاينة داخل الشبكة نفسها بكانفاس مصغّر لكل عنصر
+  document.querySelectorAll('#lgIconGrid .lg-swatch').forEach(el => {
+    const key = el.dataset.icon;
+    const mini = document.createElement('canvas');
+    mini.width = 40; mini.height = 40; mini.style.width = '22px'; mini.style.height = '22px';
+    const mctx = mini.getContext('2d');
+    mctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue('--text') || '#F0E8D0';
+    mctx.lineWidth = 2.6; mctx.lineJoin = 'round'; mctx.lineCap = 'round';
+    strokeIconPath(mctx, LOGO_ICON_DRAWERS[key](20, 20, 34));
+    mctx.stroke();
+    el.innerHTML = '';
+    el.appendChild(mini);
+  });
+
+  // نمط التعبئة
+  const fillGrid = document.getElementById('lgFillGrid');
+  fillGrid.innerHTML = `
+    <div class="lg-opt-btn active" data-fill="gradient" onclick="pickLogoFill('gradient', this)" data-i18n="lg-fill-grad">🌈 تدرّج لوني</div>
+    <div class="lg-opt-btn" data-fill="solid" onclick="pickLogoFill('solid', this)" data-i18n="lg-fill-solid">◼️ لون واحد</div>`;
+
+  const shapeLabels = { circle:'⭕', rounded:'▢', square:'⬛', hexagon:'⬡', none:'∅' };
+  const shapeGrid = document.getElementById('lgShapeGrid');
+  shapeGrid.innerHTML = LOGO_SHAPES.map((s, i) =>
+    `<div class="lg-swatch${i===0?' active':''}" data-shape="${s}" onclick="pickLogoShape('${s}', this)">${shapeLabels[s]}</div>`
+  ).join('');
+
+  const layoutGrid = document.getElementById('lgLayoutGrid');
+  layoutGrid.innerHTML = LOGO_LAYOUTS.map((l, i) =>
+    `<div class="lg-opt-btn${i===0?' active':''}" data-layout="${l.id}" onclick="pickLogoLayout('${l.id}', this)">${l.ar}</div>`
+  ).join('');
+
+  const bgGrid = document.getElementById('lgBgColors');
+  bgGrid.innerHTML = LOGO_PALETTES.map(p =>
+    `<div class="lg-color-swatch${p.bg==='#D4A017'?' active':''}" style="background:${p.bg};" onclick="pickLogoBg('${p.bg}','${p.bg2}', this)"></div>`
+  ).join('');
+
+  const fgGrid = document.getElementById('lgFgColors');
+  const fgColors = ['#0E0900','#FFFFFF','#F5F5F0','#D4A017','#2C3E50','#1B5E3F','#B71C1C','#4A1B6D'];
+  fgGrid.innerHTML = fgColors.map(c =>
+    `<div class="lg-color-swatch${c==='#0E0900'?' active':''}" style="background:${c};border:1px solid rgba(255,255,255,.15);" onclick="pickLogoFg('${c}', this)"></div>`
+  ).join('');
+
+  const fontGrid = document.getElementById('lgFontGrid');
+  fontGrid.innerHTML = LOGO_FONTS.map((f, i) =>
+    `<div class="lg-opt-btn${f.id==='cairo'?' active':''}" data-font="${f.id}" style="font-family:${f.css};" onclick="pickLogoFont('${f.id}', this)">${f.label}</div>`
+  ).join('');
+
+  const nameInput = document.getElementById('lgm-name');
+  nameInput.addEventListener('input', () => {
+    // اختيار خط تلقائي حسب لغة الاسم (عربي/لاتيني) عند أول كتابة
+    if (nameInput.dataset.autoFont !== 'off') {
+      const wantAr = isArabicText(nameInput.value);
+      const curFont = LOGO_FONTS.find(f => f.id === logoState.font);
+      if (curFont && ((wantAr && curFont.scripts !== 'ar') || (!wantAr && curFont.scripts !== 'ar' && nameInput.value && curFont.scripts !== 'en'))) {
+        const target = wantAr ? 'cairo' : 'poppins';
+        logoState.font = target;
+        document.querySelectorAll('#lgFontGrid .lg-opt-btn').forEach(el => el.classList.toggle('active', el.dataset.font === target));
+      }
+    }
+    drawLogo();
+  });
+}
+
+function pickLogoPalette(i, el) {
+  const p = LOGO_PALETTES[i];
+  logoState.bg = p.bg; logoState.bg2 = p.bg2; logoState.fg = p.fg;
+  document.querySelectorAll('#lgPaletteGrid .lg-palette-chip').forEach(x => x.style.borderColor = 'transparent');
+  el.style.borderColor = 'var(--gold)';
+  document.querySelectorAll('#lgBgColors .lg-color-swatch').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('#lgFgColors .lg-color-swatch').forEach(x => x.classList.remove('active'));
+  drawLogo();
+}
+function pickLogoIcon(k, el)   { logoState.icon = k; setActive(el, '.lg-swatch'); drawLogo(); }
+function pickLogoFill(f, el)   { logoState.fill = f; setActive(el, '.lg-opt-btn'); drawLogo(); }
+function pickLogoShape(s, el)  { logoState.shape = s; setActive(el, '.lg-swatch'); drawLogo(); }
+function pickLogoLayout(l, el) { logoState.layout = l; setActive(el, '.lg-opt-btn'); drawLogo(); }
+function pickLogoBg(c, c2, el) { logoState.bg = c; logoState.bg2 = c2; setActive(el, '.lg-color-swatch'); drawLogo(); }
+function pickLogoFg(c, el)     { logoState.fg = c; setActive(el, '.lg-color-swatch'); drawLogo(); }
+function pickLogoFont(f, el)   {
+  logoState.font = f;
+  document.getElementById('lgm-name').dataset.autoFont = 'off';
+  setActive(el, '.lg-opt-btn'); drawLogo();
+}
+
+function setActive(el, siblingSelector) {
+  const parent = el.parentElement;
+  parent.querySelectorAll(siblingSelector).forEach(x => x.classList.remove('active'));
+  el.classList.add('active');
+}
+
+function drawLogo() {
+  const canvas = document.getElementById('logoCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+  ctx.fillStyle = '#FFFFFF';
+  ctx.fillRect(0, 0, W, H);
+
+  const name = (document.getElementById('lgm-name')?.value || 'اسمك').trim() || 'اسمك';
+  const { icon, shape, layout, fill, bg, bg2, fg, font } = logoState;
+  const fontCss = (LOGO_FONTS.find(f => f.id === font) || LOGO_FONTS[0]).css;
+  const drawIcon = LOGO_ICON_DRAWERS[icon] || LOGO_ICON_DRAWERS.bag;
+
+  function shapeFill(cx, cy, r) {
+    if (fill === 'gradient') {
+      const g = ctx.createLinearGradient(cx - r, cy - r, cx + r, cy + r);
+      g.addColorStop(0, bg); g.addColorStop(1, bg2);
+      return g;
+    }
+    return bg;
+  }
+
+  function pathShape(cx, cy, size) {
+    ctx.beginPath();
+    if (shape === 'circle') { ctx.arc(cx, cy, size/2, 0, Math.PI*2); }
+    else if (shape === 'square') { ctx.rect(cx-size/2, cy-size/2, size, size); }
+    else if (shape === 'rounded') {
+      const r=size*0.22, x=cx-size/2, y=cy-size/2, w=size, h=size;
+      ctx.moveTo(x+r,y); ctx.arcTo(x+w,y,x+w,y+h,r); ctx.arcTo(x+w,y+h,x,y+h,r);
+      ctx.arcTo(x,y+h,x,y,r); ctx.arcTo(x,y,x+w,y,r);
+    } else if (shape === 'hexagon') {
+      const r=size/2;
+      for (let i=0;i<6;i++){ const a=Math.PI/3*i-Math.PI/2; const px=cx+r*Math.cos(a), py=cy+r*Math.sin(a); i===0?ctx.moveTo(px,py):ctx.lineTo(px,py); }
+      ctx.closePath();
+    }
+  }
+
+  function drawShapeAt(cx, cy, size) {
+    if (shape === 'none') return;
+    ctx.save();
+    ctx.shadowColor = 'rgba(0,0,0,.18)';
+    ctx.shadowBlur = size * 0.06;
+    ctx.shadowOffsetY = size * 0.03;
+    pathShape(cx, cy, size);
+    ctx.fillStyle = shapeFill(cx, cy, size/2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawIconStroke(cx, cy, size, color) {
+    ctx.strokeStyle = color;
+    ctx.lineWidth = size * 0.055;
+    ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+    strokeIconPath(ctx, drawIcon(cx, cy, size));
+    ctx.stroke();
+  }
+
+  const cx = W/2, cy = H/2;
+
+  if (layout === 'icon-top') {
+    const shapeSize = shape === 'none' ? W*0.5 : W*0.42;
+    const scy = H*0.36;
+    drawShapeAt(cx, scy, shapeSize);
+    drawIconStroke(cx, scy, shapeSize*0.5, shape === 'none' ? bg : fg);
+    ctx.fillStyle = fg;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `900 ${W*0.10}px ${fontCss}`;
+    ctx.fillText(name, cx, H*0.78);
+
+  } else if (layout === 'icon-side') {
+    const iconCx = W*0.28, shapeSize = W*0.4;
+    drawShapeAt(iconCx, cy, shapeSize);
+    drawIconStroke(iconCx, cy, shapeSize*0.5, shape === 'none' ? bg : fg);
+    ctx.fillStyle = fg;
+    ctx.font = `900 ${W*0.09}px ${fontCss}`;
+    ctx.textAlign = 'start'; ctx.textBaseline = 'middle';
+    wrapCanvasText(ctx, name, W*0.5, cy, W*0.42, W*0.11);
+
+  } else { // text-only
+    ctx.fillStyle = fg;
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `900 ${W*0.15}px ${fontCss}`;
+    ctx.fillText(name, cx, cy);
+  }
+}
+
+// التفاف نص بسيط لتخطيط "أيقونة بجانب" عند طول الاسم
+function wrapCanvasText(ctx, text, x, y, maxWidth, lineHeight) {
+  const words = text.split(' ');
+  let line = '', lines = [];
+  for (const w of words) {
+    const test = line ? line + ' ' + w : w;
+    if (ctx.measureText(test).width > maxWidth && line) { lines.push(line); line = w; }
+    else line = test;
+  }
+  if (line) lines.push(line);
+  lines = lines.slice(0, 2);
+  const startY = y - ((lines.length - 1) * lineHeight) / 2;
+  lines.forEach((l, i) => ctx.fillText(l, x, startY + i * lineHeight));
+}
+
+function downloadManualLogo() {
+  const canvas = document.getElementById('logoCanvas');
+  const link = document.createElement('a');
+  link.download = 'tajer-logo.png';
+  link.href = canvas.toDataURL('image/png');
+  link.click();
+  saveHist('🎨 تصميم الشعار', 'شعار يدوي: ' + (document.getElementById('lgm-name')?.value || ''));
+  showToast(M('msg_logodl') || '✓');
+}
+// ========== LOGO DESIGN END ==========
+
+// ========== BACKGROUND REMOVAL (in-browser AI) ==========
+let bgSelectedFile = null;
+
+document.getElementById('bgInput').addEventListener('change', function(e) {
+  const file = e.target.files[0];
+  if (!file) return;
+  bgSelectedFile = file;
+  const url = URL.createObjectURL(file);
+  document.getElementById('bgPreview').src = url;
+  document.getElementById('bgPreviewWrap').style.display = 'block';
+  document.getElementById('bg-btn').style.display = 'block';
+  document.getElementById('bg-res').style.display = 'none';
+  document.getElementById('bg-err').style.display = 'none';
+  document.getElementById('bgUploadLabel').textContent = '✅ ' + file.name;
+});
+
+async function runBgRemove() {
+  if (!bgSelectedFile) { showToast(M('msg_img')); return; }
+  const loadEl = document.getElementById('bg-load');
+  const errEl  = document.getElementById('bg-err');
+  const resEl  = document.getElementById('bg-res');
+  const btnEl  = document.getElementById('bg-btn');
+
+  loadEl.style.display = 'block';
+  errEl.style.display  = 'none';
+  resEl.style.display  = 'none';
+  btnEl.style.display  = 'none';
+
+  try {
+    // تتطلب حساباً وتخصم من الرصيد المجاني
+    await consumeUse();
+    // تصغير الصورة تلقائياً إن كانت كبيرة (يمنع مشاكل الذاكرة على الجوال)
+    document.getElementById('bgLoadText').textContent = 'جارٍ تجهيز الصورة...';
+    const resized = await resizeImageFile(bgSelectedFile, 1024);
+
+    // تحميل مكتبة إزالة الخلفية — مصادر متعددة (إذا فشل الأول يجرّب التالي)
+    document.getElementById('bgLoadText').textContent = 'جارٍ تحميل الذكاء الاصطناعي... (المرة الأولى قد تأخذ دقيقة)';
+    const cdnSources = [
+      'https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.5.5/dist/browser.mjs',
+      'https://unpkg.com/@imgly/background-removal@1.5.5/dist/browser.mjs',
+      'https://esm.sh/@imgly/background-removal@1.5.5',
+      'https://cdn.skypack.dev/@imgly/background-removal@1.5.5'
+    ];
+    let removeBackground = null;
+    let lastErr = null;
+    for (const src of cdnSources) {
+      try {
+        const mod = await import(src);
+        removeBackground = mod.removeBackground || (mod.default && mod.default.removeBackground);
+        if (removeBackground) break;
+      } catch(e) { lastErr = e; }
+    }
+    if (!removeBackground) throw new Error('تعذّر تحميل المكتبة من كل المصادر. جرّب شبكة WiFi أخرى أو فعّل VPN. ' + String(lastErr).slice(0,100));
+
+    document.getElementById('bgLoadText').textContent = 'جارٍ إزالة الخلفية... (قد تأخذ 30-60 ثانية)';
+
+    const blob = await removeBackground(resized);
+    const url  = URL.createObjectURL(blob);
+
+    document.getElementById('bgResult').src   = url;
+    document.getElementById('bgDownload').href = url;
+    resEl.style.display = 'block';
+    saveHist('🗑️ إزالة الخلفية', 'تمت إزالة خلفية صورة بنجاح');
+  } catch(e) {
+    const m = String(e && e.message);
+    if (m === 'LOGIN_REQUIRED' || m === 'LIMIT_REACHED') {
+      handleAiError(e, errEl);
+    } else {
+      errEl.innerHTML = '❌ <span style="font-size:.72rem;font-family:monospace;direction:ltr;display:inline-block;word-break:break-all;">' + m.slice(0, 200) + '</span>';
+      errEl.style.display = 'block';
+    }
+    btnEl.style.display = 'block';
+  } finally {
+    loadEl.style.display = 'none';
+    document.getElementById('bgLoadText').textContent = 'جارٍ تحميل الذكاء الاصطناعي... (المرة الأولى قد تأخذ دقيقة)';
+  }
+}
+
+// تصغير الصورة قبل المعالجة (يحل مشاكل الذاكرة على الجوالات)
+function resizeImageFile(file, maxDim) {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      let { width, height } = img;
+      if (width <= maxDim && height <= maxDim) {
+        URL.revokeObjectURL(img.src);
+        resolve(file); // صغيرة أصلاً — لا حاجة للتصغير
+        return;
+      }
+      const scale = Math.min(maxDim / width, maxDim / height);
+      width  = Math.round(width * scale);
+      height = Math.round(height * scale);
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      URL.revokeObjectURL(img.src);
+      canvas.toBlob(b => b ? resolve(b) : reject(new Error('resize failed')), 'image/jpeg', 0.92);
+    };
+    img.onerror = () => reject(new Error('لا يمكن قراءة الصورة'));
+    img.src = URL.createObjectURL(file);
+  });
+}
+
+// ========== BACKGROUND REMOVAL END ==========
+let adUnlockedService = null;
+
+// ========== PRO / SHOW ==========
+function showPro() { document.getElementById('proModal').classList.add('open'); }
+function closeProModal() { document.getElementById('proModal').classList.remove('open'); }
+document.getElementById('proModal').addEventListener('click', e => { if (e.target === document.getElementById('proModal')) closeProModal(); });
+
+// ========== I18N (minimal) ==========
+const I18N = {"ar": {"sSub": "خدمات التجارة الإلكترونية", "oh0": "مرحباً في تاجر", "op0": "منصة الذكاء الاصطناعي لخدمات التجارة الإلكترونية — كل ما يحتاجه متجرك في مكان واحد.", "oh1": "اكتب وصف منتجك في ثوانٍ", "op1": "أدخل اسم المنتج وسيكتب الذكاء الاصطناعي وصفًا احترافيًا يبيع بشكل تلقائي.", "oh2": "10 لغات في لحظة", "op2": "ترجمة فورية للعربية والفرنسية والإنجليزية لتصل لعملاء أكثر حول العالم.", "oh3": "11 خدمة بالذكاء الاصطناعي", "op3": "من SEO إلى حملات البريد إلى ردود العملاء — كل شيء تحتاجه في تطبيق واحد.", "obNext": "التالي", "obSkip": "تخطي", "wH": "مرحباً، تاجر 👋", "wP": "ماذا تريد أن تنجز اليوم؟", "wPlan": "الخطة المجانية", "adT": "💎 اشترك في تاجر برو", "adS": "افتح كل الخدمات بلا حدود — 12$/شهر", "secFree": "الخدمات المجانية", "s1n": "وصف المنتج", "s1s": "وصف احترافي بالذكاء", "ftag1": "مجاني", "s2n": "ترجمة المنتجات", "s2s": "10 لغات فورياً", "ftag2": "مجاني", "s3n": "تحسين SEO", "s3s": "كلمات مفتاحية + ميتا", "ftag3": "مجاني", "s4n": "منشورات سوشيال", "s4s": "فيسبوك · إنستغرام · تيك توك", "s5n": "حملات البريد", "s5s": "بريد تسويقي احترافي", "s6n": "ردود العملاء", "s6s": "رد احترافي في ثوانٍ", "s7n": "إدخال المنتجات", "s7s": "تنظيم وتصنيف تلقائي", "s8n": "صفحات الهبوط", "s8s": "محتوى صفحة بيع كامل", "s9n": "نصوص إعلانية", "s9s": "فيسبوك · جوجل", "s10n": "تقارير المبيعات", "s10s": "تحليل وتوصيات", "s11n": "تسمية المتجر", "s11s": "اسم وهوية تجارية", "sp4n": "إزالة الخلفية", "sp4s": "صور احترافية بدون خلفية", "s12n": "حاسبة الربح", "s12s": "اعرف ربحك الصافي الحقيقي", "s13n": "سكريبت الفيديو", "s13s": "نص إعلان تيك توك جاهز", "s14n": "المنتج الرابح", "s14s": "اقتراح منتجات رائجة لبلدك", "s15n": "تأكيد الطلبات", "s15s": "رسائل واتساب تقلل الرفض", "s16n": "ردود التعليقات", "s16s": "ردود سوشيال فورية جاهزة", "s17n": "خطة محتوى شهر", "s17s": "30 يوم منشورات جاهزة", "hiT": "سجل أعمالي", "prT": "الاشتراك", "prH": "اختر خطتك", "prP": "ابدأ مجانًا، وارقِّ عندما تكبر", "proBannerSub": "كل الخدمات مفتوحة · بدون إعلانات", "billMonthly": "شهري", "billYearly": "سنوي", "pfN": "🆓 المجاني", "pm": "/شهر", "pf1": "12 خدمة ذكاء اصطناعي مفتوحة", "pf2": "ترجمة لـ 10 لغات", "pf3": "خدمات برو وبرو ماكس مقفلة", "pf4": "خدمات برو وبرو ماكس مقفلة", "curPlan": "الخطة الحالية ✓", "ppN": "👑 تاجر برو", "pm2": "/شهر", "proPriceNote": "120$ سنوياً — أي 10$ شهرياً", "pp1": "🚫 بدون أي إعلانات نهائياً", "pp2": "500 استخدام شهرياً · 6,000 سنوياً", "pp3": "💰 حاسبة الربح الذكية", "pp4": "🎬 سكريبت الفيديو الإعلاني", "pp5": "🎯 اقتراح المنتج الرابح", "pp6": "📞 رسائل تأكيد الطلبات", "pp7": "💬 ردود التعليقات الفورية", "pp8": "📅 خطة محتوى 30 يوماً", "pp9": "⚡ كل خدمة جديدة فور إطلاقها", "upBtn": "اشترك الآن — 12$/شهر", "pfT": "حسابي", "pfName": "تاجر", "pfEmail": "المستخدم المجاني", "stPlan": "الخطة الحالية", "stPV": "مجاني", "stUp": "ترقية للبرو", "stLang": "اللغة", "stLV": "العربية", "stAbout": "عن التطبيق", "nbH": "الرئيسية", "nbHi": "السجل", "nbPr": "اشتراك", "nbPf": "حسابي", "d-t": "✍️ وصف المنتج", "d-s": "وصف احترافي بالذكاء الاصطناعي", "d-l1": "اسم المنتج", "d-l2": "تفاصيل إضافية", "d-l3": "اللغة", "d-l4": "الأسلوب", "d-btn": "✨ توليد الوصف", "d-rl": "النتيجة", "d-cp": "نسخ", "d-rg": "إعادة", "tr-t": "🌍 ترجمة المنتجات", "tr-s": "ترجمة فورية لـ 10 لغات", "tr-l1": "النص", "tr-l2": "من اللغة", "tr-l3": "إلى اللغات (اختر ما تريد)", "tr-ar": "🇩🇿 العربية", "tr-btn": "🌍 ترجم الآن", "tr-cp": "نسخ", "seo-t": "🔍 تحسين SEO", "seo-s": "كلمات مفتاحية + ميتا", "seo-l1": "اسم المتجر / النشاط", "seo-l2": "تصنيف المنتجات", "seo-l3": "لغة النتائج", "seo-btn": "🔍 توليد SEO", "seo-cp": "نسخ", "seo-rg": "إعادة", "so-t": "📱 منشورات سوشيال", "so-s": "محتوى جاهز للنشر", "so-l1": "المنتج أو الحملة", "so-l2": "المنصة", "so-l3": "الهدف", "so-l4": "اللغة", "so-btn": "📱 إنشاء المنشور", "em-t": "📧 حملات البريد", "em-s": "بريد تسويقي احترافي", "em-l1": "الهدف من البريد", "em-l2": "اسم متجرك", "em-l3": "تفاصيل العرض (اختياري)", "em-l4": "اللغة", "em-btn": "📧 كتابة البريد", "re-t": "💬 ردود العملاء", "re-s": "رد احترافي في ثوانٍ", "re-l1": "رسالة العميل", "re-l2": "نوع الرد", "re-l3": "لغة الرد", "re-btn": "💬 كتابة الرد", "pr2-t": "📦 إدخال المنتجات", "pr2-s": "تنظيم وتصنيف تلقائي", "pr2-l1": "معلومات المنتج الخام", "pr2-l2": "نوع المتجر", "pr2-l3": "اللغة", "pr2-btn": "📦 تنظيم المنتج", "lp-t": "🏠 صفحات الهبوط", "lp-s": "محتوى صفحة بيع كامل", "lp-l1": "اسم المنتج أو الخدمة", "lp-l2": "الجمهور المستهدف", "lp-l3": "السعر", "lp-l4": "اللغة", "lp-btn": "🏠 إنشاء المحتوى", "ad2-t": "📢 نصوص إعلانية", "ad2-s": "إعلانات فيسبوك وجوجل", "ad2-l1": "المنتج أو الخدمة", "ad2-l2": "المنصة", "ad2-l3": "الهدف", "ad2-l4": "اللغة", "ad2-btn": "📢 كتابة الإعلان", "rp-t": "📊 تقارير المبيعات", "rp-s": "تحليل وتوصيات", "rp-l1": "بيانات المبيعات", "rp-l2": "نوع التقرير", "rp-l3": "اللغة", "rp-btn": "📊 تحليل البيانات", "nm-t": "🏷️ تسمية المتجر", "nm-s": "اسم وهوية تجارية", "nm-l1": "نوع المنتجات التي تبيعها", "nm-l2": "الجمهور المستهدف", "nm-l3": "الطابع المطلوب", "nm-l4": "اللغة المفضلة للاسم", "nm-btn": "🏷️ اقتراح أسماء", "bg-t": "🗑️ إزالة الخلفية", "bg-s": "صور منتجات احترافية بخلفية شفافة", "bgUploadLabel": "اضغط لاختيار صورة المنتج", "bg-btn": "🗑️ إزالة الخلفية", "bgLoadText": "جارٍ تحميل الذكاء الاصطناعي... (المرة الأولى قد تأخذ دقيقة)", "bgDownload": "⬇️ تحميل الصورة", "lg-t": "🎨 تصميم الشعار", "lg-s": "بالذكاء الاصطناعي أو صمّمه بنفسك", "lg-l1": "اسم العلامة التجارية", "lg-l2": "مجال النشاط", "lg-l3": "الطابع المطلوب", "lg-l4": "اللون الأساسي", "lg-btn": "🎨 توليد الشعار", "lgDownload": "⬇️ تحميل", "pc-t": "💰 حاسبة الربح الذكية", "pc-s": "اعرف ربحك الصافي الحقيقي", "pc-btn": "💰 احسب ربحي", "vs-t": "🎬 سكريبت الفيديو الإعلاني", "vs-s": "نص فيديو تيك توك/ريلز جاهز للتصوير", "vs-btn": "🎬 اكتب السكريبت", "wp-t": "🎯 المنتج الرابح", "wp-s": "اقتراحات منتجات رائجة لسوقك", "wp-btn": "🎯 اقترح لي منتجات", "oc-t": "📞 تأكيد الطلبات", "oc-s": "رسائل واتساب تقلل نسبة الرفض", "oc-btn": "📞 اكتب الرسائل", "cm-t": "💬 ردود التعليقات", "cm-s": "ردود سوشيال فورية واحترافية", "cm-btn": "💬 اكتب الردود", "cp-t": "📅 خطة محتوى شهر كامل", "cp-s": "30 يوم منشورات جاهزة للنشر", "cp2-btn": "📅 أنشئ خطة الشهر", "proMT": "💎 خدمة حصرية للمشتركين", "proMP": "اشترك في تاجر برو واستخدم كل الخدمات الاحترافية مقابل 12$/شهر فقط.", "d-name__ph": "مثال: حقيبة جلدية يدوية", "d-det__ph": "اللون، المواد، المميزات...", "tr-in__ph": "أدخل النص هنا...", "seo-store__ph": "مثال: متجر الأناقة للأزياء", "seo-cat__ph": "مثال: أزياء نسائية · عطور", "so-prod__ph": "مثال: تخفيض العيد على العطور", "em-store__ph": "مثال: متجر نور", "em-det__ph": "الخصم، المنتج، الفترة...", "re-msg__ph": "أدخل رسالة العميل أو سؤاله هنا...", "pr2-raw__ph": "الصق معلومات المنتج كما هي — اسم، سعر، مواصفات، مورد...", "lp-prod__ph": "مثال: دورة التجارة الإلكترونية", "lp-aud__ph": "مثال: مبتدئون في التجارة الإلكترونية", "lp-price__ph": "مثال: 49$", "ad2-prod__ph": "مثال: ساعة ذكية مقاومة للماء", "rp-data__ph": "أدخل أرقام مبيعاتك: المنتجات الأكثر مبيعاً، الإيرادات، المرتجعات، الفترة الزمنية...", "nm-cat__ph": "مثال: عطور فاخرة · ملابس أطفال · إلكترونيات", "nm-aud__ph": "مثال: نساء 25-40 · شباب · عائلات", "lg-name__ph": "مثال: نور للعطور", "lg-field__ph": "مثال: عطور فاخرة · ملابس · إلكترونيات", "vs-prod__ph": "مثال: ساعة ذكية مقاومة للماء", "vs-features__ph": "بطارية أسبوع · قياس نبض · مقاومة ماء", "wp-niche__ph": "مثال: إلكترونيات · جمال · منزل · رياضة", "oc-prod__ph": "مثال: ساعة ذكية", "oc-price__ph": "3500 دج", "oc-store__ph": "متجر نور", "cm-comments__ph": "مثال:&#10;بشحال هادي؟&#10;كاين توصيل لوهران؟&#10;واش كاين ضمان؟", "cm-prod__ph": "مثال: ساعة ذكية", "cm-price__ph": "3500 دج", "cm-delivery__ph": "58 ولاية", "cp2-biz__ph": "مثال: متجر عطور رجالية", "cp2-event__ph": "مثال: رمضان · العودة للمدارس · الصيف", "d-lang__ar": "العربية", "d-tone__pro": "احترافي", "d-tone__friendly": "ودي", "d-tone__luxury": "فاخر", "d-tone__simple": "بسيط", "tr-from__ar": "🇩🇿 العربية", "seo-lang__ar": "العربية", "so-plat__all": "كل المنصات", "so-goal__sell": "زيادة المبيعات", "so-goal__engage": "تفاعل الجمهور", "so-goal__brand": "بناء العلامة", "so-goal__offer": "إعلان عرض", "so-lang__ar": "العربية", "em-type__promo": "عرض ترويجي", "em-type__welcome": "ترحيب بعميل جديد", "em-type__abandon": "استرداد سلة متروكة", "em-type__followup": "متابعة بعد الشراء", "em-type__newprod": "إطلاق منتج جديد", "em-lang__ar": "العربية", "re-type__helpful": "مساعد ومهني", "re-type__apology": "اعتذار وحل", "re-type__refund": "طلب استرداد", "re-type__delay": "تأخير الشحن", "re-type__complaint": "شكوى عامة", "re-lang__ar": "العربية", "pr2-type__general": "عام", "pr2-lang__ar": "العربية", "lp-lang__ar": "العربية", "ad2-plat__both": "فيسبوك + جوجل", "ad2-goal__sales": "مبيعات", "ad2-goal__traffic": "زيارات", "ad2-goal__brand": "وعي بالعلامة", "ad2-goal__leads": "جمع بيانات", "ad2-lang__ar": "العربية", "rp-type__monthly": "شهري", "rp-type__weekly": "أسبوعي", "rp-type__product": "تحليل منتج", "rp-type__compare": "مقارنة فترتين", "rp-lang__ar": "العربية", "nm-style__luxury": "فاخر ومميز", "nm-style__fun": "مرح وحيوي", "nm-style__trust": "موثوق وكلاسيكي", "nm-style__modern": "عصري وبسيط", "nm-lang__ar": "عربي", "nm-lang__fr": "فرنسي", "nm-lang__en": "إنجليزي", "nm-lang__mix": "مزيج", "lg-style__modern minimalist": "عصري وبسيط", "lg-style__luxury elegant gold": "فاخر وأنيق", "lg-style__playful colorful": "مرح وملوّن", "lg-style__vintage classic": "كلاسيكي عريق", "lg-style__bold geometric": "جريء وهندسي", "lg-style__hand-drawn organic": "يدوي وطبيعي", "lg-color__gold and black": "ذهبي وأسود", "lg-color__blue and white": "أزرق وأبيض", "lg-color__green natural": "أخضر طبيعي", "lg-color__red energetic": "أحمر حيوي", "lg-color__pink feminine": "وردي أنثوي", "lg-color__purple luxury": "بنفسجي فاخر", "lg-color__monochrome black": "أسود أحادي", "pc-currency__دج": "دينار جزائري (دج)", "pc-currency__درهم": "درهم مغربي", "pc-currency__دينار": "دينار تونسي", "pc-currency__ريال": "ريال سعودي", "pc-currency__جنيه": "جنيه مصري", "pc-currency__$": "دولار ($)", "pc-currency__€": "يورو (€)", "vs-dur__15": "15 ثانية (سريع)", "vs-dur__30": "30 ثانية (متوسط)", "vs-dur__60": "60 ثانية (تفصيلي)", "vs-style__hook": "صادم يوقف التمرير", "vs-style__problem": "مشكلة وحل", "vs-style__story": "قصة قصيرة", "vs-style__demo": "عرض المنتج مباشرة", "vs-style__ugc": "تجربة شخصية (UGC)", "vs-lang__dz": "دارجة جزائرية", "vs-lang__ar": "عربية فصحى", "vs-lang__ma": "دارجة مغربية", "wp-country__الجزائر": "🇩🇿 الجزائر", "wp-country__المغرب": "🇲🇦 المغرب", "wp-country__تونس": "🇹🇳 تونس", "wp-country__مصر": "🇪🇬 مصر", "wp-country__السعودية": "🇸🇦 السعودية", "wp-country__الإمارات": "🇦🇪 الإمارات", "wp-country__فرنسا": "🇫🇷 فرنسا", "wp-budget__small": "صغيرة (أقل من 500$)", "wp-budget__medium": "متوسطة (500$ - 2000$)", "wp-budget__large": "كبيرة (أكثر من 2000$)", "wp-method__cod": "الدفع عند الاستلام (COD)", "wp-method__online": "دفع إلكتروني", "wp-method__both": "الاثنان", "oc-type__confirm": "تأكيد طلب جديد", "oc-type__noanswer": "العميل لا يرد على الهاتف", "oc-type__remind": "تذكير قبل التوصيل", "oc-type__delivery": "إشعار وصول الطلب اليوم", "oc-type__refused": "محاولة إنقاذ طلب مرفوض", "oc-type__thanks": "شكر بعد الاستلام + طلب تقييم", "oc-lang__dz": "دارجة جزائرية", "oc-lang__ma": "دارجة مغربية", "oc-lang__tn": "دارجة تونسية", "oc-lang__ar": "عربية فصحى", "cm-tone__friendly": "ودي وقريب", "cm-tone__pro": "احترافي رسمي", "cm-tone__fun": "مرح وخفيف", "cm-tone__urgent": "يخلق إلحاحاً للشراء", "cm-lang__dz": "دارجة جزائرية", "cm-lang__ma": "دارجة مغربية", "cm-lang__tn": "دارجة تونسية", "cm-lang__ar": "عربية فصحى", "cp2-plat__all": "كل المنصات", "cp2-freq__3": "3 منشورات (خفيف)", "cp2-freq__5": "5 منشورات (متوسط)", "cp2-freq__7": "يومياً (مكثف)", "cp2-goal__sales": "زيادة المبيعات", "cp2-goal__followers": "زيادة المتابعين", "cp2-goal__trust": "بناء الثقة والمصداقية", "cp2-goal__launch": "إطلاق منتج جديد", "cp2-lang__dz": "دارجة جزائرية", "cp2-lang__ar": "عربية فصحى", "cp2-lang__ma": "دارجة مغربية", "au-t": "👤 حساب تاجر", "au-s": "دخول فوري — اشتراكك محفوظ على كل أجهزتك", "tabLogin": "تسجيل الدخول", "tabSignup": "حساب جديد", "au-l1": "البريد الإلكتروني", "au-l2": "كلمة السر", "au-hint": "6 أحرف على الأقل · لا حاجة لتأكيد البريد", "au-btn": "🔓 دخول", "au-btn2": "✨ إنشاء الحساب", "au-forgot": "نسيت كلمة السر؟", "stAcc": "حساب تاجر", "stAccSub": "سجّل الدخول لحفظ اشتراكك", "stOut": "تسجيل الخروج", "upBtnY": "اشترك سنوياً — 120$", "freeLeft": "تجربة مجانية", "noFreeLeft": "انتهت تجربتك المجانية", "s18n": "أنشئ موقعك", "s18s": "اطلب مشروعك المخصص", "s19n": "أنشئ تطبيقك", "s19s": "اطلب مشروعك المخصص", "ws-t": "🌐 أنشئ موقعك", "ws-s": "صف ما تريده بكلماتك — وسيُبنى لك", "ws-note": "👑 اكتب فكرتك بحرية كأنك تشرحها لمصمم — كلما فصّلت أكثر، كانت النتيجة أقرب لما تتخيّله.", "ws-l1": "صف الموقع الذي تريده", "ws-l8": "لغة الموقع", "ws-btn": "🌐 ابنِ الموقع الآن", "ws-wait": "جارٍ بناء موقعك... (قد يستغرق دقيقة)", "ws-done": "✅ موقعك جاهز! حمّل الملف ثم ارفعه على netlify.com/drop مجاناً.", "ws-dl": "⬇️ تحميل الموقع", "ws-prev": "👁️ معاينة", "ws-again": "🔄 أعد البناء بنفس الوصف", "ap-t": "📱 أنشئ تطبيقك", "ap-s": "صف ما تريده بكلماتك — وسيُبنى لك", "ap-note": "👑 اكتب فكرة تطبيقك بحرية — ما يفعله، وشكله، وميزاته. كلما فصّلت أكثر، كانت النتيجة أقرب لتصوّرك.", "ap-l1": "صف التطبيق الذي تريده", "ap-l4": "رقم واتساب للطلبات (اختياري)", "ap-l6": "لغة التطبيق", "ap-btn": "📱 ابنِ التطبيق الآن", "ap-wait": "جارٍ بناء تطبيقك... (قد يستغرق دقيقة)", "ap-done": "✅ تطبيقك جاهز! حمّله وارفعه على netlify.com/drop ثم حوّله لتطبيق Android عبر pwabuilder.com", "ap-dl": "⬇️ تحميل التطبيق", "ap-prev": "👁️ معاينة", "ap-again": "🔄 أعد البناء بنفس الوصف", "pmN": "👑 تاجر برو ماكس", "maxBadge": "الأقوى", "maxPriceNote": "350$ سنوياً — أي 29.2$ شهرياً", "pm1": "كل مزايا برو", "pm2f": "🌐 أنشئ موقعك الإلكتروني الكامل", "pm3f": "📱 أنشئ تطبيق جوال جاهز للنشر", "pm4f": "✅ 1,000 سؤال شهرياً · 12,000 سنوياً", "pm5f": "ملفات جاهزة تملكها بالكامل", "maxBtn": "👑 اشترك في برو ماكس — 30$/شهر", "maxBtnY": "👑 برو ماكس سنوياً — 350$", "maxMT": "خدمة برو ماكس", "maxMP": "أنشئ موقعك الإلكتروني وتطبيق جوالك بنفسك — ملفات كاملة تملكها وترفعها أينما شئت.", "maxF1": "موقع إلكتروني احترافي كامل", "maxF2": "تطبيق جوال جاهز لـ Google Play", "maxF3": "1,000 سؤال شهرياً · 12,000 سنوياً", "maxCTA": "👑 عرض خطة برو ماكس", "perYear": " /سنة", "tagOpen": "متاح", "tagTry": "جرّب مجاناً", "tagPro": "برو", "tagMax": "برو ماكس", "tierPro": "تاجر برو 👑", "tierMax": "برو ماكس 👑", "quotaLeft": "استخدام متبقٍ", "quotaOut": "انتهت حصتك — جدّد اشتراكك", "py-t": "💳 إتمام الاشتراك", "py-method": "اختر طريقة الدفع", "py-dzd": "بطاقة بنكية", "py-usdt": "لدي USDT — تفعيل فوري ⚡", "py-dzd-note": "ادفع ببطاقة EDAHABIA أو CIB عبر صفحة دفع آمنة. يُفعَّل اشتراكك مباشرة بعد نجاح الدفع.", "py-dzd-btn": "🇩🇿 ادفع بالبطاقة الآن", "py-steps": "خطوات الدفع:", "py-step1": "1. أرسل <b>المبلغ الدقيق</b> أدناه بعملة USDT شبكة TRC20", "py-step2": "2. المبلغ خاص بك وحدك — لا ترسل مبلغاً مقرّباً", "py-step3": "3. اضغط \"تحققت من الدفع\" بعد الإرسال", "py-step4": "4. يُفعَّل اشتراكك تلقائياً خلال ثوانٍ ⚡", "py-net": "اختر الشبكة", "py-addr": "عنوان المحفظة · TRC20 فقط", "py-copy": "📋 نسخ العنوان", "py-tx": "رقم عملية التحويل (Transaction Hash)", "py-send": "₮ أرسل طلب التفعيل", "py-myorders": "طلباتي", "py-exact": "أرسل هذا المبلغ بالضبط", "py-exact-why": "القروش تُميّز دفعتك عن غيرها — لا تُغيّرها", "py-copyamt": "📋 نسخ المبلغ", "py-warn": "⚠️ أرسل USDT على شبكة TRC20 فقط. أي شبكة أخرى تعني ضياع المبلغ نهائياً.", "py-check": "✅ تحققت من الدفع", "py-card-t": "💳 الدفع بالبطاقة", "py-card1": "• صفحة دفع آمنة ومشفّرة من Chargily", "py-card2": "• تُقبل بطاقات EDAHABIA و CIB", "py-card3": "• اشتراكك يُفعَّل تلقائياً لحظة نجاح الدفع ⚡", "py-total": "المبلغ الإجمالي", "py-dzd-note2": "يُخصم من بطاقتك مباشرة", "py-card-btn": "💳 ادفع بالبطاقة الآن", "py-intl": "بطاقة دولية", "py-intl-t": "💳 الدفع ببطاقة دولية", "py-intl1": "• Visa · Mastercard · Apple Pay · Google Pay", "py-intl2": "• تفعيل تلقائي فور نجاح الدفع ⚡", "py-intl-kyc": "⚠️ تتطلب هذه الطريقة توثيق هويتك لدى مزوّد الدفع (صورة بطاقة + سيلفي)، وتُضاف رسوم ≈ 2$ + 1.5%. إن كنت في الجزائر فالبطاقة الجزائرية أسرع وأرخص.", "py-plus-fees": "+ رسوم مزوّد الدفع", "py-intl-btn": "💳 ادفع ببطاقة دولية", "pw-t": "🔑 تغيير كلمة السر", "pw-s": "داخل التطبيق — بلا بريد", "pw-l1": "كلمة السر الحالية", "pw-l2": "كلمة السر الجديدة", "pw-l3": "تأكيد كلمة السر الجديدة", "pw-hint": "6 أحرف على الأقل", "pw-btn": "🔑 حفظ كلمة السر", "stPass": "تغيير كلمة السر", "stPassSub": "داخل التطبيق بلا بريد", "adm-s": "طلبات الدفع الواردة", "np-t": "🔑 تعيين كلمة سر جديدة", "np-note": "✅ تم التحقق من بريدك. اختر كلمة سر جديدة الآن.", "np-l1": "كلمة السر الجديدة", "np-l2": "تأكيد كلمة السر", "np-btn": "🔑 حفظ والدخول", "fg-t": "🔓 استعادة كلمة السر", "fg-s1": "أدخل بريدك لإرسال رابط الاستعادة", "fg-s2": "تفقّد بريدك الآن", "fg-l1": "البريد الإلكتروني", "fg-b1": "📧 أرسل رابط الاستعادة", "fg-resend": "لم يصلك الرمز؟ أعد الإرسال", "fg-how": "📧 سنرسل رابطاً إلى بريدك. اضغطه من هذا الجهاز لتعيين كلمة سر جديدة.", "fg-tip": "لم تجد الرسالة؟ تفقّد مجلد الرسائل غير المرغوب فيها (Spam).", "fg-resend2": "إعادة الإرسال", "fg-back": "رجوع لتسجيل الدخول", "adm-tab1": "طلبات الدفع", "adm-tab2": "المستخدمون", "adm-total": "إجمالي المسجّلين", "adm-week": "جدد هذا الأسبوع", "ws-ph": "مثال: أريد موقعاً لمتجر عطور فاخرة اسمه \"نور\". لوني المفضل الذهبي والأسود. أريد قسماً لأشهر 4 عطور مع صورهم، وقسم آراء عملاء، وزر واتساب كبير للطلب. اجعل الطابع فخماً وهادئاً...", "ws-ex1": "💡 مثال: متجر إلكتروني", "ws-ex2": "💡 مثال: معرض أعمال", "ws-ex3": "💡 مثال: صفحة خدمة", "ap-ph": "مثال: تطبيق لمتجر ملابسي اسمه \"ستايل\". يعرض قائمة منتجات بصور وأسعار، ويسمح للعميل بإضافتها لسلة، ثم إرسال الطلب عبر واتساب. أريد لوناً أزرق داكناً وشريط تنقّل سفلي بسيط...", "ap-ex1": "💡 مثال: متجر بسلة شراء", "ap-ex2": "💡 مثال: حجز مواعيد", "ap-ex3": "💡 مثال: قائمة مطعم", "usdt-have": "لدي USDT بالفعل", "usdt-new": "لا أعرف ما هو USDT", "usdt-what-t": "₮ ما هو USDT؟", "usdt-what-d": "عملة رقمية قيمتها ثابتة = 1 دولار أمريكي دائماً. تُستخدم للدفع بين الدول بأمان وبدون بنوك.", "usdt-how-t": "📲 كيف تحصل عليه؟", "usdt-how-1": "1. حمّل تطبيق <b>Binance</b> أو <b>Bybit</b> من متجر التطبيقات", "usdt-how-2": "2. أنشئ حساباً (يتطلب هوية شخصية)", "usdt-how-3": "3. اشترِ USDT ببطاقتك البنكية مباشرة من داخل التطبيق", "usdt-how-4": "4. ارجع هنا وأرسل المبلغ المطلوب لعنوان محفظتنا أدناه", "s20n": "تصميم الشعار", "s20s": "بالذكاء الاصطناعي أو يدوياً", "lg-tab1": "بالذكاء الاصطناعي", "lg-tab2": "محرر يدوي", "lg-wait": "جارٍ رسم شعارك... (قد يستغرق نصف دقيقة)", "lg-again": "🔄 توليد آخر", "lg-m-name": "اسم العلامة التجارية", "lg-m-icon": "اختر أيقونة", "lg-m-shape": "شكل الخلفية", "lg-m-layout": "التخطيط", "lg-m-bg": "لون الخلفية", "lg-m-fg": "لون الأيقونة والنص", "lg-m-font": "الخط", "lg-m-dl": "⬇️ تحميل الشعار PNG (عالي الجودة)", "lg-m-palette": "لوحات ألوان جاهزة", "lg-m-fill": "نمط التعبئة", "lg-fill-grad": "🌈 تدرّج لوني", "lg-fill-solid": "◼️ لون واحد", "ws-s2": "اطلب مشروعك وسنتواصل معك بالسعر المناسب", "ap-s2": "اطلب مشروعك وسنتواصل معك بالسعر المناسب", "req-mine": "طلباتي السابقة", "req-status-new": "جديد", "req-status-discussing": "قيد النقاش", "req-status-quoted": "أُرسل سعر", "req-status-won": "تم الاتفاق", "req-status-closed": "مغلق", "req-note-website": "صف موقعك بحرية — الاسم، النشاط، الألوان، الأقسام المطلوبة، أي شيء تتخيّله. سنراسلك بعرض سعر مناسب لمشروعك.", "req-note-app": "صف تطبيقك بحرية — ما يفعله، ميزاته، شكله. سنراسلك بعرض سعر مناسب لمشروعك.", "req-l1": "صف مشروعك بالتفصيل", "req-ph-website": "مثال: أريد موقعاً لمتجر عطور فاخرة اسمه \"نور\"، ذهبي وأسود، مع قسم منتجات وآراء عملاء وزر واتساب...", "req-ph-app": "مثال: تطبيق لمتجري اسمه \"ستايل\"، يعرض المنتجات، سلة شراء، طلب عبر واتساب...", "req-send": "📨 إرسال الطلب", "req-back": "رجوع للطلبات", "req-reply-ph": "اكتب رسالتك...", "adm-tab3": "طلبات مخصصة", "adm-status": "حالة الطلب", "adm-reply-ph": "اكتب ردك للعميل...", "bm-tab1": "أنشئ بنفسك الآن", "bm-tab2": "اطلب استشارة", "bm-policy": "🚫 ممنوع طلب مواقع أو محتوى إباحي/جنسي نهائياً. أي طلب من هذا النوع يُحجب تلقائياً ولا يُنفَّذ.", "bm-note-website": "👑 اكتب فكرتك بحرية كأنك تشرحها لمصمم — كلما فصّلت أكثر، كانت النتيجة أقرب لما تتخيّله.", "bm-note-app": "👑 اكتب فكرة تطبيقك بحرية — ما يفعله، وشكله، وميزاته.", "bm-lang": "اللغة", "bm-build": "⚡ ابنِه الآن", "bm-wait": "جارٍ البناء... (قد يستغرق دقيقة)", "bm-done": "✅ جاهز! حمّله وارفعه على netlify.com/drop مجاناً.", "lg-s2": "صمّمه بنفسك في ثوانٍ", "s20s2": "صمّمه بنفسك مجاناً", "adm-tab-cx": "شكاوى التجار", "stComplaint": "شكوى أو مشكلة", "stComplaintSub": "فريقنا يراجعها ويردّ عليك", "cxform-t": "📋 شكوى أو مشكلة", "cxform-s": "فريقنا يراجع كل شكوى بعناية", "cxform-note": "صف مشكلتك بوضوح، وسيراجعها فريقنا ويردّ عليك هنا في أقرب وقت.", "cxform-ph": "اشرح المشكلة بالتفصيل...", "cxform-btn": "📨 إرسال الشكوى", "cx-mine": "شكاواي السابقة", "cx-subject-label": "عنوان الشكوى", "cx-subject-ph": "مثال: مشكلة في الدفع", "cx-msg-label": "نص الشكوى", "cx-status-label": "الحالة", "cx-status-new": "جديدة", "cx-status-in_progress": "قيد المعالجة", "cx-status-resolved": "تم الحل", "cx-reply-label": "ردّنا", "cx-reply-ph": "اكتب ردك هنا...", "cx-reply-btn": "💾 حفظ الرد", "ws-chat-s": "تحدّث معنا وسنبنيه لك", "ap-chat-s": "تحدّث معنا وسنبنيه لك", "chat-build-btn": "🏗️ ابنِ الملف الآن", "chat-input-ph": "اكتب رسالتك...", "chat-building": "جارٍ البناء... (قد يستغرق دقيقة)", "builds-left": "رصيد التوليدات المتبقي:", "msg-build-limit": "⚠️ نفد رصيد التوليدات لديك. اشترِ رصيداً إضافياً أو جدّد اشتراكك.", "topup-offer-t": "⚡ احصل على 20 توليداً إضافياً فوراً", "topup-offer-s": "دفعة واحدة 10$ — تُفعَّل تلقائياً خلال ثوانٍ", "topup-btn": "⚡ اشترِ 20 توليداً — 10$", "topup-onetime": "دفعة واحدة", "topup-success": "✅ تمت إضافة 20 توليداً فوراً!", "pm-builds": "🏗️ 20 توليداً شهرياً · أو 240 في الاشتراك السنوي", "maxF-builds": "20 توليداً شهرياً · 240 سنوياً"}, "fr": {"sSub": "Services e-commerce IA", "oh0": "Bienvenue sur Tajer", "op0": "La plateforme IA pour l'e-commerce — tout ce dont votre boutique a besoin en un seul endroit.", "oh1": "Rédigez votre description en secondes", "op1": "Entrez le nom du produit et l'IA rédigera une description professionnelle qui vend.", "oh2": "10 langues en un instant", "op2": "Traduction instantanée pour toucher plus de clients dans le monde entier.", "oh3": "18 services alimentés par l'IA", "op3": "Du SEO aux campagnes email et réponses clients — tout dans une seule application.", "obNext": "Suivant", "obSkip": "Passer", "wH": "Bonjour, Tajer 👋", "wP": "Que souhaitez-vous accomplir aujourd'hui ?", "wPlan": "Forfait gratuit", "adT": "💎 Passez à Tajer Pro", "adS": "Tous les services sans limite — 12$/mois", "secFree": "Services disponibles", "s1n": "Description produit", "s1s": "Description pro par IA", "ftag1": "Gratuit", "s2n": "Traduction produits", "s2s": "10 langues instantanées", "ftag2": "Gratuit", "s3n": "Optimisation SEO", "s3s": "Mots-clés + méta", "ftag3": "Gratuit", "s4n": "Posts réseaux sociaux", "s4s": "Facebook · Instagram · TikTok", "s5n": "Campagnes email", "s5s": "Email marketing pro", "s6n": "Réponses clients", "s6s": "Réponse pro en secondes", "s7n": "Saisie produits", "s7s": "Organisation automatique", "s8n": "Pages de vente", "s8s": "Contenu complet de landing page", "s9n": "Textes publicitaires", "s9s": "Facebook · Google", "s10n": "Rapports de ventes", "s10s": "Analyse et recommandations", "s11n": "Nom de boutique", "s11s": "Nom et identité de marque", "sp4n": "Suppression du fond", "sp4s": "Photos pro sans arrière-plan", "s12n": "Calculateur de profit", "s12s": "Connaissez votre bénéfice net réel", "s13n": "Script vidéo", "s13s": "Texte pub TikTok prêt", "s14n": "Produit gagnant", "s14s": "Produits tendance pour votre pays", "s15n": "Confirmation commandes", "s15s": "Messages WhatsApp anti-refus", "s16n": "Réponses commentaires", "s16s": "Réponses sociales instantanées", "s17n": "Plan de contenu mensuel", "s17s": "30 jours de posts prêts", "hiT": "Mes travaux", "prT": "Abonnement", "prH": "Choisissez votre forfait", "prP": "Commencez gratuitement, évoluez à votre rythme", "proBannerSub": "Tous les services ouverts · sans publicités", "billMonthly": "Mensuel", "billYearly": "Annuel", "pfN": "🆓 Gratuit", "pm": " /mois", "pf1": "12 services IA ouverts", "pf2": "Traduction en 10 langues", "pf3": "Services Pro et Pro Max verrouillés", "pf4": "Services Pro et Pro Max verrouillés", "curPlan": "Forfait actuel ✓", "ppN": "👑 Tajer Pro", "pm2": " /mois", "proPriceNote": "120$ par an — soit 10$ par mois", "pp1": "🚫 Aucune publicité", "pp2": "500 utilisations/mois · 6 000 par an", "pp3": "💰 Calculateur de profit", "pp4": "🎬 Script vidéo publicitaire", "pp5": "🎯 Suggestion de produit gagnant", "pp6": "📞 Messages de confirmation", "pp7": "💬 Réponses aux commentaires", "pp8": "📅 Plan de contenu 30 jours", "pp9": "⚡ Chaque nouveau service dès sa sortie", "upBtn": "S'abonner — 12$/mois", "pfT": "Mon compte", "pfName": "Tajer", "pfEmail": "Utilisateur gratuit", "stPlan": "Forfait actuel", "stPV": "Gratuit", "stUp": "Passer à Pro", "stLang": "Langue", "stLV": "Français", "stAbout": "À propos", "nbH": "Accueil", "nbHi": "Historique", "nbPr": "Abonnement", "nbPf": "Compte", "d-t": "✍️ Description produit", "d-s": "Description professionnelle par IA", "d-l1": "Nom du produit", "d-l2": "Détails supplémentaires", "d-l3": "Langue", "d-l4": "Style", "d-btn": "✨ Générer la description", "d-rl": "Résultat", "d-cp": "Copier", "d-rg": "Régénérer", "tr-t": "🌍 Traduction produits", "tr-s": "Traduction instantanée en 10 langues", "tr-l1": "Texte", "tr-l2": "Langue source", "tr-l3": "Langues cibles (choisissez)", "tr-ar": "🇩🇿 Arabe", "tr-btn": "🌍 Traduire", "tr-cp": "Copier", "seo-t": "🔍 Optimisation SEO", "seo-s": "Mots-clés + méta", "seo-l1": "Nom de la boutique / activité", "seo-l2": "Catégorie de produits", "seo-l3": "Langue des résultats", "seo-btn": "🔍 Générer le SEO", "seo-cp": "Copier", "seo-rg": "Régénérer", "so-t": "📱 Posts réseaux sociaux", "so-s": "Contenu prêt à publier", "so-l1": "Produit ou campagne", "so-l2": "Plateforme", "so-l3": "Objectif", "so-l4": "Langue", "so-btn": "📱 Créer le post", "em-t": "📧 Campagnes email", "em-s": "Email marketing professionnel", "em-l1": "Objectif de l'email", "em-l2": "Nom de votre boutique", "em-l3": "Détails de l'offre (optionnel)", "em-l4": "Langue", "em-btn": "📧 Rédiger l'email", "re-t": "💬 Réponses clients", "re-s": "Réponse professionnelle en secondes", "re-l1": "Message du client", "re-l2": "Type de réponse", "re-l3": "Langue de réponse", "re-btn": "💬 Rédiger la réponse", "pr2-t": "📦 Saisie produits", "pr2-s": "Organisation automatique", "pr2-l1": "Informations brutes du produit", "pr2-l2": "Type de boutique", "pr2-l3": "Langue", "pr2-btn": "📦 Organiser le produit", "lp-t": "🏠 Pages de vente", "lp-s": "Contenu complet de landing page", "lp-l1": "Nom du produit ou service", "lp-l2": "Public cible", "lp-l3": "Prix", "lp-l4": "Langue", "lp-btn": "🏠 Créer le contenu", "ad2-t": "📢 Textes publicitaires", "ad2-s": "Publicités Facebook et Google", "ad2-l1": "Produit ou service", "ad2-l2": "Plateforme", "ad2-l3": "Objectif", "ad2-l4": "Langue", "ad2-btn": "📢 Rédiger la publicité", "rp-t": "📊 Rapports de ventes", "rp-s": "Analyse et recommandations", "rp-l1": "Données de ventes", "rp-l2": "Type de rapport", "rp-l3": "Langue", "rp-btn": "📊 Analyser les données", "nm-t": "🏷️ Nom de boutique", "nm-s": "Nom et identité de marque", "nm-l1": "Type de produits vendus", "nm-l2": "Public cible", "nm-l3": "Style souhaité", "nm-l4": "Langue préférée du nom", "nm-btn": "🏷️ Proposer des noms", "bg-t": "🗑️ Suppression du fond", "bg-s": "Photos produits pro sur fond transparent", "bgUploadLabel": "Appuyez pour choisir une photo", "bg-btn": "🗑️ Supprimer le fond", "bgLoadText": "Chargement de l'IA... (la première fois peut prendre une minute)", "bgDownload": "⬇️ Télécharger l'image", "lg-t": "🎨 Création de logo", "lg-s": "Par IA ou créez-le vous-même", "lg-l1": "Nom de la marque", "lg-l2": "Domaine d'activité", "lg-l3": "Style souhaité", "lg-l4": "Couleur principale", "lg-btn": "🎨 Générer le logo", "lgDownload": "⬇️ Télécharger", "pc-t": "💰 Calculateur de profit", "pc-s": "Connaissez votre bénéfice net réel", "pc-btn": "💰 Calculer mon profit", "vs-t": "🎬 Script vidéo publicitaire", "vs-s": "Script TikTok/Reels prêt à tourner", "vs-btn": "🎬 Écrire le script", "wp-t": "🎯 Produit gagnant", "wp-s": "Suggestions de produits tendance", "wp-btn": "🎯 Proposer des produits", "oc-t": "📞 Confirmation commandes", "oc-s": "Messages WhatsApp qui réduisent les refus", "oc-btn": "📞 Rédiger les messages", "cm-t": "💬 Réponses commentaires", "cm-s": "Réponses sociales pro et instantanées", "cm-btn": "💬 Rédiger les réponses", "cp-t": "📅 Plan de contenu mensuel", "cp-s": "30 jours de posts prêts à publier", "cp2-btn": "📅 Créer le plan du mois", "proMT": "💎 Service réservé aux abonnés", "proMP": "Abonnez-vous à Tajer Pro et utilisez tous les services professionnels.", "d-name__ph": "Ex : sac en cuir fait main", "d-det__ph": "Couleur, matériaux, avantages...", "tr-in__ph": "Entrez le texte ici...", "seo-store__ph": "Ex : Boutique Élégance Mode", "seo-cat__ph": "Ex : mode femme · parfums", "so-prod__ph": "Ex : promotion parfums", "em-store__ph": "Ex : Boutique Nour", "em-det__ph": "Remise, produit, période...", "re-msg__ph": "Entrez le message ou la question du client...", "pr2-raw__ph": "Collez les infos du produit — nom, prix, caractéristiques, fournisseur...", "lp-prod__ph": "Ex : formation e-commerce", "lp-aud__ph": "Ex : débutants en e-commerce", "lp-price__ph": "Ex : 49$", "ad2-prod__ph": "Ex : montre connectée étanche", "rp-data__ph": "Vos chiffres : meilleures ventes, revenus, retours, période...", "nm-cat__ph": "Ex : parfums de luxe · vêtements enfants", "nm-aud__ph": "Ex : femmes 25-40 · jeunes · familles", "lg-name__ph": "Ex : Nour Parfums", "lg-field__ph": "Ex : parfums de luxe · mode", "vs-prod__ph": "Ex : montre connectée étanche", "vs-features__ph": "Batterie 1 semaine · cardio · étanche", "wp-niche__ph": "Ex : électronique · beauté · maison", "oc-prod__ph": "Ex : montre connectée", "oc-price__ph": "3500 DA", "oc-store__ph": "Boutique Nour", "cm-comments__ph": "Ex :\nC'est combien ?\nLivraison à Oran ?\nY a-t-il une garantie ?", "cm-prod__ph": "Ex : montre connectée", "cm-price__ph": "3500 DA", "cm-delivery__ph": "58 wilayas", "cp2-biz__ph": "Ex : boutique de parfums homme", "cp2-event__ph": "Ex : Ramadan · rentrée · été", "d-lang__ar": "Arabe", "d-tone__pro": "Professionnel", "d-tone__friendly": "Amical", "d-tone__luxury": "Luxueux", "d-tone__simple": "Simple", "tr-from__ar": "🇩🇿 Arabe", "seo-lang__ar": "Arabe", "so-plat__all": "Toutes les plateformes", "so-goal__sell": "Augmenter les ventes", "so-goal__engage": "Engagement du public", "so-goal__brand": "Notoriété de marque", "so-goal__offer": "Annoncer une offre", "so-lang__ar": "Arabe", "em-type__promo": "Offre promotionnelle", "em-type__welcome": "Bienvenue nouveau client", "em-type__abandon": "Panier abandonné", "em-type__followup": "Suivi après achat", "em-type__newprod": "Lancement produit", "em-lang__ar": "Arabe", "re-type__helpful": "Serviable et pro", "re-type__apology": "Excuses et solution", "re-type__refund": "Demande de remboursement", "re-type__delay": "Retard de livraison", "re-type__complaint": "Réclamation générale", "re-lang__ar": "Arabe", "pr2-type__general": "Général", "pr2-lang__ar": "Arabe", "lp-lang__ar": "Arabe", "ad2-plat__both": "Facebook + Google", "ad2-goal__sales": "Ventes", "ad2-goal__traffic": "Trafic", "ad2-goal__brand": "Notoriété", "ad2-goal__leads": "Collecte de contacts", "ad2-lang__ar": "Arabe", "rp-type__monthly": "Mensuel", "rp-type__weekly": "Hebdomadaire", "rp-type__product": "Analyse produit", "rp-type__compare": "Comparer deux périodes", "rp-lang__ar": "Arabe", "nm-style__luxury": "Luxueux et distinctif", "nm-style__fun": "Joyeux et dynamique", "nm-style__trust": "Fiable et classique", "nm-style__modern": "Moderne et épuré", "nm-lang__ar": "Arabe", "nm-lang__fr": "Français", "nm-lang__en": "Anglais", "nm-lang__mix": "Mixte", "lg-style__modern minimalist": "Moderne et minimaliste", "lg-style__luxury elegant gold": "Luxueux et élégant", "lg-style__playful colorful": "Joyeux et coloré", "lg-style__vintage classic": "Vintage classique", "lg-style__bold geometric": "Audacieux géométrique", "lg-style__hand-drawn organic": "Dessiné à la main", "lg-color__gold and black": "Or et noir", "lg-color__blue and white": "Bleu et blanc", "lg-color__green natural": "Vert naturel", "lg-color__red energetic": "Rouge énergique", "lg-color__pink feminine": "Rose féminin", "lg-color__purple luxury": "Violet luxueux", "lg-color__monochrome black": "Noir monochrome", "pc-currency__دج": "Dinar algérien (DA)", "pc-currency__درهم": "Dirham marocain", "pc-currency__دينار": "Dinar tunisien", "pc-currency__ريال": "Riyal saoudien", "pc-currency__جنيه": "Livre égyptienne", "pc-currency__$": "Dollar ($)", "pc-currency__€": "Euro (€)", "vs-dur__15": "15 secondes (rapide)", "vs-dur__30": "30 secondes (moyen)", "vs-dur__60": "60 secondes (détaillé)", "vs-style__hook": "Accroche qui stoppe le scroll", "vs-style__problem": "Problème et solution", "vs-style__story": "Histoire courte", "vs-style__demo": "Démonstration produit", "vs-style__ugc": "Témoignage personnel (UGC)", "vs-lang__dz": "Arabe algérien", "vs-lang__ar": "Arabe standard", "vs-lang__ma": "Arabe marocain", "wp-country__الجزائر": "🇩🇿 Algérie", "wp-country__المغرب": "🇲🇦 Maroc", "wp-country__تونس": "🇹🇳 Tunisie", "wp-country__مصر": "🇪🇬 Égypte", "wp-country__السعودية": "🇸🇦 Arabie saoudite", "wp-country__الإمارات": "🇦🇪 Émirats", "wp-country__فرنسا": "🇫🇷 France", "wp-budget__small": "Petit (moins de 500$)", "wp-budget__medium": "Moyen (500$ - 2000$)", "wp-budget__large": "Grand (plus de 2000$)", "wp-method__cod": "Paiement à la livraison", "wp-method__online": "Paiement en ligne", "wp-method__both": "Les deux", "oc-type__confirm": "Confirmer une nouvelle commande", "oc-type__noanswer": "Le client ne répond pas", "oc-type__remind": "Rappel avant livraison", "oc-type__delivery": "Livraison aujourd'hui", "oc-type__refused": "Sauver une commande refusée", "oc-type__thanks": "Remerciement + avis", "oc-lang__dz": "Arabe algérien", "oc-lang__ma": "Arabe marocain", "oc-lang__tn": "Arabe tunisien", "oc-lang__ar": "Arabe standard", "cm-tone__friendly": "Amical et proche", "cm-tone__pro": "Professionnel formel", "cm-tone__fun": "Léger et amusant", "cm-tone__urgent": "Crée l'urgence d'achat", "cm-lang__dz": "Arabe algérien", "cm-lang__ma": "Arabe marocain", "cm-lang__tn": "Arabe tunisien", "cm-lang__ar": "Arabe standard", "cp2-plat__all": "Toutes les plateformes", "cp2-freq__3": "3 posts (léger)", "cp2-freq__5": "5 posts (moyen)", "cp2-freq__7": "Quotidien (intensif)", "cp2-goal__sales": "Augmenter les ventes", "cp2-goal__followers": "Gagner des abonnés", "cp2-goal__trust": "Bâtir la confiance", "cp2-goal__launch": "Lancer un produit", "cp2-lang__dz": "Arabe algérien", "cp2-lang__ar": "Arabe standard", "cp2-lang__ma": "Arabe marocain", "au-t": "👤 Compte Tajer", "au-s": "Accès immédiat — votre abonnement sur tous vos appareils", "tabLogin": "Connexion", "tabSignup": "Créer un compte", "au-l1": "Adresse e-mail", "au-l2": "Mot de passe", "au-hint": "Au moins 6 caractères · aucune confirmation requise", "au-btn": "🔓 Se connecter", "au-btn2": "✨ Créer le compte", "au-forgot": "Mot de passe oublié ?", "stAcc": "Compte Tajer", "stAccSub": "Connectez-vous pour sauvegarder votre abonnement", "stOut": "Se déconnecter", "upBtnY": "S'abonner à l'année — 120$", "freeLeft": "essai gratuit", "noFreeLeft": "Votre essai gratuit est terminé", "s18n": "Créez votre site", "s18s": "Demandez votre projet sur mesure", "s19n": "Créez votre app", "s19s": "Demandez votre projet sur mesure", "ws-t": "🌐 Créez votre site", "ws-s": "Décrivez ce que vous voulez avec vos mots — et on le construit", "ws-note": "👑 Décrivez librement votre idée comme à un designer — plus vous détaillez, plus le résultat sera proche de votre vision.", "ws-l1": "Décrivez le site que vous voulez", "ws-l8": "Langue du site", "ws-btn": "🌐 Construire le site", "ws-wait": "Construction de votre site... (jusqu'à une minute)", "ws-done": "✅ Votre site est prêt ! Téléchargez puis publiez sur netlify.com/drop.", "ws-dl": "⬇️ Télécharger le site", "ws-prev": "👁️ Aperçu", "ws-again": "🔄 Reconstruire avec la même description", "ap-t": "📱 Créez votre app", "ap-s": "Décrivez ce que vous voulez avec vos mots — et on le construit", "ap-note": "👑 Décrivez librement votre idée d'app — ce qu'elle fait, son style, ses fonctionnalités.", "ap-l1": "Décrivez l'app que vous voulez", "ap-l4": "WhatsApp pour commandes (optionnel)", "ap-l6": "Langue de l'app", "ap-btn": "📱 Construire l'app", "ap-wait": "Construction de votre app... (jusqu'à une minute)", "ap-done": "✅ Votre app est prête ! Publiez sur netlify.com/drop puis convertissez via pwabuilder.com", "ap-dl": "⬇️ Télécharger l'app", "ap-prev": "👁️ Aperçu", "ap-again": "🔄 Reconstruire avec la même description", "pmN": "👑 Tajer Pro Max", "maxBadge": "Le plus complet", "maxPriceNote": "350$ par an — soit 29,2$ par mois", "pm1": "Tous les avantages Pro", "pm2f": "🌐 Créez votre site web complet", "pm3f": "📱 Créez une app mobile publiable", "pm4f": "✅ 1 000 questions/mois · 12 000 par an", "pm5f": "Fichiers que vous possédez", "maxBtn": "👑 Pro Max — 30$/mois", "maxBtnY": "👑 Pro Max annuel — 350$", "maxMT": "Service Pro Max", "maxMP": "Créez votre site et votre app — des fichiers complets que vous possédez.", "maxF1": "Site web professionnel complet", "maxF2": "App mobile prête pour Google Play", "maxF3": "1 000 questions/mois · 12 000 par an", "maxCTA": "👑 Voir Pro Max", "perYear": " /an", "tagOpen": "Disponible", "tagTry": "Essai gratuit", "tagPro": "Pro", "tagMax": "Pro Max", "tierPro": "Tajer Pro 👑", "tierMax": "Pro Max 👑", "quotaLeft": "utilisations restantes", "quotaOut": "Quota épuisé — renouvelez", "py-t": "💳 Finaliser l'abonnement", "py-method": "Choisissez le mode de paiement", "py-dzd": "Carte bancaire", "py-usdt": "J'ai des USDT — instantané ⚡", "py-dzd-note": "Payez par EDAHABIA ou CIB sur une page sécurisée. Activation immédiate après paiement.", "py-dzd-btn": "🇩🇿 Payer par carte", "py-steps": "Étapes de paiement :", "py-step1": "1. Envoyez le <b>montant exact</b> ci-dessous en USDT réseau TRC20", "py-step2": "2. Ce montant vous est propre — ne l'arrondissez pas", "py-step3": "3. Cliquez sur « J'ai payé » après l'envoi", "py-step4": "4. Activation automatique en quelques secondes ⚡", "py-net": "Choisissez le réseau", "py-addr": "Adresse du portefeuille · TRC20 uniquement", "py-copy": "📋 Copier l'adresse", "py-tx": "Hash de transaction", "py-send": "₮ Envoyer la demande", "py-myorders": "Mes demandes", "py-exact": "Envoyez exactement ce montant", "py-exact-why": "Les centimes identifient votre paiement — ne les changez pas", "py-copyamt": "📋 Copier le montant", "py-warn": "⚠️ Envoyez USDT uniquement sur TRC20. Tout autre réseau = fonds perdus.", "py-check": "✅ J'ai payé", "py-card-t": "💳 Paiement par carte", "py-card1": "• Page de paiement sécurisée par Chargily", "py-card2": "• Cartes EDAHABIA et CIB acceptées", "py-card3": "• Activation automatique dès le paiement ⚡", "py-total": "Montant total", "py-dzd-note2": "Débité directement de votre carte", "py-card-btn": "💳 Payer par carte", "py-intl": "Carte internationale", "py-intl-t": "💳 Paiement par carte internationale", "py-intl1": "• Visa · Mastercard · Apple Pay · Google Pay", "py-intl2": "• Activation automatique dès le paiement ⚡", "py-intl-kyc": "⚠️ Cette méthode exige une vérification d'identité chez le prestataire (pièce d'identité + selfie), avec des frais ≈ 2$ + 1,5%. En Algérie, la carte locale est plus rapide et moins chère.", "py-plus-fees": "+ frais du prestataire", "py-intl-btn": "💳 Payer par carte internationale", "pw-t": "🔑 Changer le mot de passe", "pw-s": "Dans l'application — sans e-mail", "pw-l1": "Mot de passe actuel", "pw-l2": "Nouveau mot de passe", "pw-l3": "Confirmez le nouveau mot de passe", "pw-hint": "Au moins 6 caractères", "pw-btn": "🔑 Enregistrer", "stPass": "Changer le mot de passe", "stPassSub": "Dans l'application, sans e-mail", "adm-s": "Demandes de paiement reçues", "np-t": "🔑 Nouveau mot de passe", "np-note": "✅ E-mail vérifié. Choisissez un nouveau mot de passe.", "np-l1": "Nouveau mot de passe", "np-l2": "Confirmez le mot de passe", "np-btn": "🔑 Enregistrer et se connecter", "fg-t": "🔓 Récupération du mot de passe", "fg-s1": "Entrez votre e-mail pour recevoir le lien", "fg-s2": "Consultez votre e-mail", "fg-l1": "Adresse e-mail", "fg-b1": "📧 Envoyer le lien", "fg-resend": "Code non reçu ? Renvoyer", "fg-how": "📧 Nous enverrons un lien par e-mail. Ouvrez-le depuis cet appareil pour définir un nouveau mot de passe.", "fg-tip": "E-mail introuvable ? Vérifiez le dossier spam.", "fg-resend2": "Renvoyer", "fg-back": "Retour à la connexion", "adm-tab1": "Paiements", "adm-tab2": "Utilisateurs", "adm-total": "Total inscrits", "adm-week": "Nouveaux cette semaine", "ws-ph": "Ex: Je veux un site pour une parfumerie de luxe nommée \"Nour\". Couleurs préférées : or et noir. Une section pour 4 parfums vedettes, des avis clients, et un gros bouton WhatsApp. Ambiance luxueuse et calme...", "ws-ex1": "💡 Exemple : boutique en ligne", "ws-ex2": "💡 Exemple : portfolio", "ws-ex3": "💡 Exemple : page de service", "ap-ph": "Ex: Une app pour ma boutique de vêtements \"Style\". Liste de produits avec photos et prix, panier d'achat, commande via WhatsApp. Bleu foncé, barre de navigation simple...", "ap-ex1": "💡 Exemple : boutique avec panier", "ap-ex2": "💡 Exemple : prise de rendez-vous", "ap-ex3": "💡 Exemple : menu de restaurant", "usdt-have": "J'ai déjà des USDT", "usdt-new": "Je ne sais pas ce qu'est l'USDT", "usdt-what-t": "₮ Qu'est-ce que l'USDT ?", "usdt-what-d": "Une monnaie numérique dont la valeur est toujours fixée à 1 dollar US. Utilisée pour payer entre pays en toute sécurité, sans banques.", "usdt-how-t": "📲 Comment l'obtenir ?", "usdt-how-1": "1. Téléchargez l'app <b>Binance</b> ou <b>Bybit</b> depuis le store", "usdt-how-2": "2. Créez un compte (pièce d'identité requise)", "usdt-how-3": "3. Achetez de l'USDT par carte bancaire directement dans l'app", "usdt-how-4": "4. Revenez ici et envoyez le montant demandé à notre adresse ci-dessous", "s20n": "Création de logo", "s20s": "Par IA ou manuellement", "lg-tab1": "Par intelligence artificielle", "lg-tab2": "Éditeur manuel", "lg-wait": "Dessin de votre logo... (jusqu'à 30 secondes)", "lg-again": "🔄 Régénérer", "lg-m-name": "Nom de la marque", "lg-m-icon": "Choisissez une icône", "lg-m-shape": "Forme de fond", "lg-m-layout": "Disposition", "lg-m-bg": "Couleur de fond", "lg-m-fg": "Couleur de l'icône et du texte", "lg-m-font": "Police", "lg-m-dl": "⬇️ Télécharger PNG (haute qualité)", "lg-m-palette": "Palettes de couleurs", "lg-m-fill": "Style de remplissage", "lg-fill-grad": "🌈 Dégradé", "lg-fill-solid": "◼️ Couleur unie", "ws-s2": "Décrivez votre projet, nous vous recontacterons avec un prix adapté", "ap-s2": "Décrivez votre projet, nous vous recontacterons avec un prix adapté", "req-mine": "Mes demandes précédentes", "req-status-new": "Nouveau", "req-status-discussing": "En discussion", "req-status-quoted": "Devis envoyé", "req-status-won": "Accord conclu", "req-status-closed": "Fermé", "req-note-website": "Décrivez librement votre site — nom, activité, couleurs, sections souhaitées. Nous vous enverrons un devis adapté.", "req-note-app": "Décrivez librement votre app — ce qu'elle fait, ses fonctionnalités, son style. Nous vous enverrons un devis adapté.", "req-l1": "Décrivez votre projet en détail", "req-ph-website": "Ex : Un site pour une parfumerie de luxe \"Nour\", or et noir, avec produits, avis clients, bouton WhatsApp...", "req-ph-app": "Ex : Une app pour ma boutique \"Style\", produits, panier, commande via WhatsApp...", "req-send": "📨 Envoyer la demande", "req-back": "Retour aux demandes", "req-reply-ph": "Écrivez votre message...", "adm-tab3": "Demandes sur mesure", "adm-status": "Statut de la demande", "adm-reply-ph": "Écrivez votre réponse au client...", "bm-tab1": "Créez-le vous-même", "bm-tab2": "Demander un devis", "bm-policy": "🚫 Les sites ou contenus pornographiques/sexuels sont strictement interdits. Toute demande de ce type est automatiquement bloquée.", "bm-note-website": "Décrivez librement votre idée comme à un designer — plus vous détaillez, plus le résultat sera proche de votre vision.", "bm-note-app": "Décrivez librement votre idée d'app — ce qu'elle fait, son style, ses fonctionnalités.", "bm-lang": "Langue", "bm-build": "⚡ Construire maintenant", "bm-wait": "Construction en cours... (jusqu'à une minute)", "bm-done": "✅ Prêt ! Téléchargez et publiez sur netlify.com/drop.", "lg-s2": "Créez-le vous-même en quelques secondes", "s20s2": "Créez-le vous-même gratuitement", "adm-tab-cx": "Réclamations", "stComplaint": "Réclamation ou problème", "stComplaintSub": "Notre équipe l'examine et vous répond", "cxform-t": "📋 Réclamation ou problème", "cxform-s": "Notre équipe examine chaque réclamation avec soin", "cxform-note": "Décrivez clairement votre problème, notre équipe l'examinera et vous répondra ici rapidement.", "cxform-ph": "Expliquez le problème en détail...", "cxform-btn": "📨 Envoyer la réclamation", "cx-mine": "Mes réclamations précédentes", "cx-subject-label": "Sujet de la réclamation", "cx-subject-ph": "Ex : Problème de paiement", "cx-msg-label": "Détail de la réclamation", "cx-status-label": "Statut", "cx-status-new": "Nouvelle", "cx-status-in_progress": "En cours", "cx-status-resolved": "Résolue", "cx-reply-label": "Notre réponse", "cx-reply-ph": "Écrivez votre réponse ici...", "cx-reply-btn": "💾 Enregistrer la réponse", "ws-chat-s": "Discutez avec nous et on le construit", "ap-chat-s": "Discutez avec nous et on le construit", "chat-build-btn": "🏗️ Construire maintenant", "chat-input-ph": "Écrivez votre message...", "chat-building": "Construction en cours... (jusqu'à une minute)", "builds-left": "Solde de constructions restant :", "msg-build-limit": "⚠️ Votre solde de constructions est épuisé. Achetez un solde ou renouvelez votre abonnement.", "topup-offer-t": "⚡ Obtenez 20 constructions supplémentaires", "topup-offer-s": "Paiement unique de 10$ — activé automatiquement", "topup-btn": "⚡ Acheter 20 constructions — 10$", "topup-onetime": "Paiement unique", "topup-success": "✅ 20 constructions ajoutées instantanément !", "pm-builds": "🏗️ 20 constructions/mois · ou 240 en formule annuelle", "maxF-builds": "20 constructions/mois · 240 par an"}, "en": {"sSub": "AI E-commerce Services", "oh0": "Welcome to Tajer", "op0": "The AI platform for e-commerce — everything your store needs in one place.", "oh1": "Write your product description in seconds", "op1": "Enter the product name and AI will write a professional description that sells.", "oh2": "10 languages in an instant", "op2": "Instant translation to reach more customers worldwide.", "oh3": "18 AI-powered services", "op3": "From SEO to email campaigns to customer replies — everything in one app.", "obNext": "Next", "obSkip": "Skip", "wH": "Hello, Tajer 👋", "wP": "What would you like to accomplish today?", "wPlan": "Free Plan", "adT": "💎 Upgrade to Tajer Pro", "adS": "Unlock everything unlimited — $12/month", "secFree": "Available Services", "s1n": "Product Description", "s1s": "Professional AI description", "ftag1": "Free", "s2n": "Product Translation", "s2s": "10 languages instantly", "ftag2": "Free", "s3n": "SEO Optimization", "s3s": "Keywords + meta", "ftag3": "Free", "s4n": "Social Media Posts", "s4s": "Facebook · Instagram · TikTok", "s5n": "Email Campaigns", "s5s": "Professional marketing emails", "s6n": "Customer Replies", "s6s": "Professional reply in seconds", "s7n": "Product Entry", "s7s": "Automatic organizing", "s8n": "Landing Pages", "s8s": "Complete sales page content", "s9n": "Ad Copy", "s9s": "Facebook · Google", "s10n": "Sales Reports", "s10s": "Analysis and recommendations", "s11n": "Store Naming", "s11s": "Brand name and identity", "sp4n": "Background Removal", "sp4s": "Pro photos without background", "s12n": "Profit Calculator", "s12s": "Know your real net profit", "s13n": "Video Script", "s13s": "Ready TikTok ad script", "s14n": "Winning Product", "s14s": "Trending products for your country", "s15n": "Order Confirmation", "s15s": "WhatsApp messages that cut refusals", "s16n": "Comment Replies", "s16s": "Instant social replies", "s17n": "Monthly Content Plan", "s17s": "30 days of ready posts", "hiT": "My Work", "prT": "Subscription", "prH": "Choose your plan", "prP": "Start free, upgrade as you grow", "proBannerSub": "All services unlocked · no ads", "billMonthly": "Monthly", "billYearly": "Yearly", "pfN": "🆓 Free", "pm": " /month", "pf1": "12 open AI services", "pf2": "Translation into 10 languages", "pf3": "Pro and Pro Max services locked", "pf4": "Pro and Pro Max services locked", "curPlan": "Current Plan ✓", "ppN": "👑 Tajer Pro", "pm2": " /month", "proPriceNote": "$120 per year — just $10 per month", "pp1": "🚫 Zero ads", "pp2": "500 uses/month · 6,000 per year", "pp3": "💰 Smart profit calculator", "pp4": "🎬 Video ad script", "pp5": "🎯 Winning product suggestions", "pp6": "📞 Order confirmation messages", "pp7": "💬 Instant comment replies", "pp8": "📅 30-day content plan", "pp9": "⚡ Every new service on release", "upBtn": "Subscribe now — $12/month", "pfT": "My Account", "pfName": "Tajer", "pfEmail": "Free user", "stPlan": "Current Plan", "stPV": "Free", "stUp": "Upgrade to Pro", "stLang": "Language", "stLV": "English", "stAbout": "About", "nbH": "Home", "nbHi": "History", "nbPr": "Plans", "nbPf": "Account", "d-t": "✍️ Product Description", "d-s": "Professional AI-powered description", "d-l1": "Product name", "d-l2": "Additional details", "d-l3": "Language", "d-l4": "Style", "d-btn": "✨ Generate description", "d-rl": "Result", "d-cp": "Copy", "d-rg": "Regenerate", "tr-t": "🌍 Product Translation", "tr-s": "Instant translation into 10 languages", "tr-l1": "Text", "tr-l2": "From language", "tr-l3": "To languages (select)", "tr-ar": "🇩🇿 Arabic", "tr-btn": "🌍 Translate now", "tr-cp": "Copy", "seo-t": "🔍 SEO Optimization", "seo-s": "Keywords + meta", "seo-l1": "Store / business name", "seo-l2": "Product category", "seo-l3": "Results language", "seo-btn": "🔍 Generate SEO", "seo-cp": "Copy", "seo-rg": "Regenerate", "so-t": "📱 Social Media Posts", "so-s": "Ready-to-publish content", "so-l1": "Product or campaign", "so-l2": "Platform", "so-l3": "Goal", "so-l4": "Language", "so-btn": "📱 Create post", "em-t": "📧 Email Campaigns", "em-s": "Professional marketing email", "em-l1": "Email purpose", "em-l2": "Your store name", "em-l3": "Offer details (optional)", "em-l4": "Language", "em-btn": "📧 Write email", "re-t": "💬 Customer Replies", "re-s": "Professional reply in seconds", "re-l1": "Customer message", "re-l2": "Reply type", "re-l3": "Reply language", "re-btn": "💬 Write reply", "pr2-t": "📦 Product Entry", "pr2-s": "Automatic organizing", "pr2-l1": "Raw product information", "pr2-l2": "Store type", "pr2-l3": "Language", "pr2-btn": "📦 Organize product", "lp-t": "🏠 Landing Pages", "lp-s": "Complete sales page content", "lp-l1": "Product or service name", "lp-l2": "Target audience", "lp-l3": "Price", "lp-l4": "Language", "lp-btn": "🏠 Create content", "ad2-t": "📢 Ad Copy", "ad2-s": "Facebook and Google ads", "ad2-l1": "Product or service", "ad2-l2": "Platform", "ad2-l3": "Goal", "ad2-l4": "Language", "ad2-btn": "📢 Write ad", "rp-t": "📊 Sales Reports", "rp-s": "Analysis and recommendations", "rp-l1": "Sales data", "rp-l2": "Report type", "rp-l3": "Language", "rp-btn": "📊 Analyze data", "nm-t": "🏷️ Store Naming", "nm-s": "Brand name and identity", "nm-l1": "Type of products you sell", "nm-l2": "Target audience", "nm-l3": "Desired style", "nm-l4": "Preferred name language", "nm-btn": "🏷️ Suggest names", "bg-t": "🗑️ Background Removal", "bg-s": "Pro product photos with transparent background", "bgUploadLabel": "Tap to choose a product photo", "bg-btn": "🗑️ Remove background", "bgLoadText": "Loading AI... (first time may take a minute)", "bgDownload": "⬇️ Download image", "lg-t": "🎨 Logo Design", "lg-s": "By AI or design it yourself", "lg-l1": "Brand name", "lg-l2": "Business field", "lg-l3": "Desired style", "lg-l4": "Primary color", "lg-btn": "🎨 Generate logo", "lgDownload": "⬇️ Download", "pc-t": "💰 Smart Profit Calculator", "pc-s": "Know your real net profit", "pc-btn": "💰 Calculate my profit", "vs-t": "🎬 Video Ad Script", "vs-s": "TikTok/Reels script ready to film", "vs-btn": "🎬 Write script", "wp-t": "🎯 Winning Product", "wp-s": "Trending product suggestions for your market", "wp-btn": "🎯 Suggest products", "oc-t": "📞 Order Confirmation", "oc-s": "WhatsApp messages that reduce refusals", "oc-btn": "📞 Write messages", "cm-t": "💬 Comment Replies", "cm-s": "Instant professional social replies", "cm-btn": "💬 Write replies", "cp-t": "📅 Monthly Content Plan", "cp-s": "30 days of ready-to-publish posts", "cp2-btn": "📅 Create month plan", "proMT": "💎 Subscribers-only service", "proMP": "Subscribe to Tajer Pro and use every professional service.", "d-name__ph": "e.g. handmade leather bag", "d-det__ph": "Color, materials, features...", "tr-in__ph": "Enter your text here...", "seo-store__ph": "e.g. Elegance Fashion Store", "seo-cat__ph": "e.g. women's fashion · perfumes", "so-prod__ph": "e.g. Eid sale on perfumes", "em-store__ph": "e.g. Nour Store", "em-det__ph": "Discount, product, period...", "re-msg__ph": "Enter the customer's message or question...", "pr2-raw__ph": "Paste product info as-is — name, price, specs, supplier...", "lp-prod__ph": "e.g. e-commerce course", "lp-aud__ph": "e.g. e-commerce beginners", "lp-price__ph": "e.g. $49", "ad2-prod__ph": "e.g. waterproof smart watch", "rp-data__ph": "Your numbers: best sellers, revenue, returns, time period...", "nm-cat__ph": "e.g. luxury perfumes · kids clothing", "nm-aud__ph": "e.g. women 25-40 · youth · families", "lg-name__ph": "e.g. Nour Perfumes", "lg-field__ph": "e.g. luxury perfumes · fashion", "vs-prod__ph": "e.g. waterproof smart watch", "vs-features__ph": "1-week battery · heart rate · waterproof", "wp-niche__ph": "e.g. electronics · beauty · home", "oc-prod__ph": "e.g. smart watch", "oc-price__ph": "3500 DA", "oc-store__ph": "Nour Store", "cm-comments__ph": "e.g.\nHow much is this?\nDo you deliver to Oran?\nIs there a warranty?", "cm-prod__ph": "e.g. smart watch", "cm-price__ph": "3500 DA", "cm-delivery__ph": "58 provinces", "cp2-biz__ph": "e.g. men's perfume store", "cp2-event__ph": "e.g. Ramadan · back to school · summer", "d-lang__ar": "Arabic", "d-tone__pro": "Professional", "d-tone__friendly": "Friendly", "d-tone__luxury": "Luxury", "d-tone__simple": "Simple", "tr-from__ar": "🇩🇿 Arabic", "seo-lang__ar": "Arabic", "so-plat__all": "All platforms", "so-goal__sell": "Increase sales", "so-goal__engage": "Audience engagement", "so-goal__brand": "Brand building", "so-goal__offer": "Announce an offer", "so-lang__ar": "Arabic", "em-type__promo": "Promotional offer", "em-type__welcome": "Welcome new customer", "em-type__abandon": "Abandoned cart recovery", "em-type__followup": "Post-purchase follow-up", "em-type__newprod": "New product launch", "em-lang__ar": "Arabic", "re-type__helpful": "Helpful and professional", "re-type__apology": "Apology with solution", "re-type__refund": "Refund request", "re-type__delay": "Shipping delay", "re-type__complaint": "General complaint", "re-lang__ar": "Arabic", "pr2-type__general": "General", "pr2-lang__ar": "Arabic", "lp-lang__ar": "Arabic", "ad2-plat__both": "Facebook + Google", "ad2-goal__sales": "Sales", "ad2-goal__traffic": "Traffic", "ad2-goal__brand": "Brand awareness", "ad2-goal__leads": "Lead collection", "ad2-lang__ar": "Arabic", "rp-type__monthly": "Monthly", "rp-type__weekly": "Weekly", "rp-type__product": "Product analysis", "rp-type__compare": "Compare two periods", "rp-lang__ar": "Arabic", "nm-style__luxury": "Luxury and distinctive", "nm-style__fun": "Fun and vibrant", "nm-style__trust": "Trusted and classic", "nm-style__modern": "Modern and simple", "nm-lang__ar": "Arabic", "nm-lang__fr": "French", "nm-lang__en": "English", "nm-lang__mix": "Mixed", "lg-style__modern minimalist": "Modern minimalist", "lg-style__luxury elegant gold": "Luxury and elegant", "lg-style__playful colorful": "Playful and colorful", "lg-style__vintage classic": "Vintage classic", "lg-style__bold geometric": "Bold geometric", "lg-style__hand-drawn organic": "Hand-drawn organic", "lg-color__gold and black": "Gold and black", "lg-color__blue and white": "Blue and white", "lg-color__green natural": "Natural green", "lg-color__red energetic": "Energetic red", "lg-color__pink feminine": "Feminine pink", "lg-color__purple luxury": "Luxury purple", "lg-color__monochrome black": "Monochrome black", "pc-currency__دج": "Algerian Dinar (DA)", "pc-currency__درهم": "Moroccan Dirham", "pc-currency__دينار": "Tunisian Dinar", "pc-currency__ريال": "Saudi Riyal", "pc-currency__جنيه": "Egyptian Pound", "pc-currency__$": "Dollar ($)", "pc-currency__€": "Euro (€)", "vs-dur__15": "15 seconds (quick)", "vs-dur__30": "30 seconds (medium)", "vs-dur__60": "60 seconds (detailed)", "vs-style__hook": "Scroll-stopping hook", "vs-style__problem": "Problem and solution", "vs-style__story": "Short story", "vs-style__demo": "Direct product demo", "vs-style__ugc": "Personal experience (UGC)", "vs-lang__dz": "Algerian Arabic", "vs-lang__ar": "Standard Arabic", "vs-lang__ma": "Moroccan Arabic", "wp-country__الجزائر": "🇩🇿 Algeria", "wp-country__المغرب": "🇲🇦 Morocco", "wp-country__تونس": "🇹🇳 Tunisia", "wp-country__مصر": "🇪🇬 Egypt", "wp-country__السعودية": "🇸🇦 Saudi Arabia", "wp-country__الإمارات": "🇦🇪 UAE", "wp-country__فرنسا": "🇫🇷 France", "wp-budget__small": "Small (under $500)", "wp-budget__medium": "Medium ($500 - $2000)", "wp-budget__large": "Large (over $2000)", "wp-method__cod": "Cash on delivery (COD)", "wp-method__online": "Online payment", "wp-method__both": "Both", "oc-type__confirm": "Confirm a new order", "oc-type__noanswer": "Customer not answering the phone", "oc-type__remind": "Reminder before delivery", "oc-type__delivery": "Arriving today notice", "oc-type__refused": "Save a refused order", "oc-type__thanks": "Thank you + review request", "oc-lang__dz": "Algerian Arabic", "oc-lang__ma": "Moroccan Arabic", "oc-lang__tn": "Tunisian Arabic", "oc-lang__ar": "Standard Arabic", "cm-tone__friendly": "Friendly and warm", "cm-tone__pro": "Formal professional", "cm-tone__fun": "Light and fun", "cm-tone__urgent": "Creates buying urgency", "cm-lang__dz": "Algerian Arabic", "cm-lang__ma": "Moroccan Arabic", "cm-lang__tn": "Tunisian Arabic", "cm-lang__ar": "Standard Arabic", "cp2-plat__all": "All platforms", "cp2-freq__3": "3 posts (light)", "cp2-freq__5": "5 posts (medium)", "cp2-freq__7": "Daily (intensive)", "cp2-goal__sales": "Increase sales", "cp2-goal__followers": "Grow followers", "cp2-goal__trust": "Build trust", "cp2-goal__launch": "Launch a product", "cp2-lang__dz": "Algerian Arabic", "cp2-lang__ar": "Standard Arabic", "cp2-lang__ma": "Moroccan Arabic", "au-t": "👤 Tajer Account", "au-s": "Instant access — your subscription on all your devices", "tabLogin": "Sign in", "tabSignup": "Sign up", "au-l1": "Email address", "au-l2": "Password", "au-hint": "At least 6 characters · no email confirmation needed", "au-btn": "🔓 Sign in", "au-btn2": "✨ Create account", "au-forgot": "Forgot your password?", "stAcc": "Tajer Account", "stAccSub": "Sign in to save your subscription", "stOut": "Sign out", "upBtnY": "Subscribe yearly — $120", "freeLeft": "free trial", "noFreeLeft": "Your free trial has ended", "s18n": "Build your website", "s18s": "Request your custom project", "s19n": "Build your app", "s19s": "Request your custom project", "ws-t": "🌐 Build your website", "ws-s": "Describe what you want in your own words — and it gets built", "ws-note": "👑 Freely describe your idea as if to a designer — the more detail you give, the closer the result to your vision.", "ws-l1": "Describe the website you want", "ws-l8": "Site language", "ws-btn": "🌐 Build the website", "ws-wait": "Building your site... (may take a minute)", "ws-done": "✅ Your site is ready! Download it and publish on netlify.com/drop.", "ws-dl": "⬇️ Download site", "ws-prev": "👁️ Preview", "ws-again": "🔄 Rebuild with the same description", "ap-t": "📱 Build your app", "ap-s": "Describe what you want in your own words — and it gets built", "ap-note": "👑 Freely describe your app idea — what it does, how it looks, its features.", "ap-l1": "Describe the app you want", "ap-l4": "WhatsApp for orders (optional)", "ap-l6": "App language", "ap-btn": "📱 Build the app", "ap-wait": "Building your app... (may take a minute)", "ap-done": "✅ Your app is ready! Publish on netlify.com/drop then convert via pwabuilder.com", "ap-dl": "⬇️ Download app", "ap-prev": "👁️ Preview", "ap-again": "🔄 Rebuild with the same description", "pmN": "👑 Tajer Pro Max", "maxBadge": "Most powerful", "maxPriceNote": "$350 per year — just $29.2 per month", "pm1": "Everything in Pro", "pm2f": "🌐 Build your complete website", "pm3f": "📱 Build a publishable mobile app", "pm4f": "✅ 1,000 questions/month · 12,000 per year", "pm5f": "Files you fully own", "maxBtn": "👑 Get Pro Max — $30/month", "maxBtnY": "👑 Pro Max yearly — $350", "maxMT": "Pro Max service", "maxMP": "Build your own website and mobile app — complete files you own.", "maxF1": "Complete professional website", "maxF2": "Mobile app ready for Google Play", "maxF3": "1,000 questions/month · 12,000 per year", "maxCTA": "👑 View Pro Max", "perYear": " /year", "tagOpen": "Available", "tagTry": "Try free", "tagPro": "Pro", "tagMax": "Pro Max", "tierPro": "Tajer Pro 👑", "tierMax": "Pro Max 👑", "quotaLeft": "uses left", "quotaOut": "Quota used up — renew", "py-t": "💳 Complete subscription", "py-method": "Choose payment method", "py-dzd": "Bank card", "py-usdt": "I have USDT — instant ⚡", "py-dzd-note": "Pay with EDAHABIA or CIB on a secure page. Instant activation after payment.", "py-dzd-btn": "🇩🇿 Pay by card now", "py-steps": "Payment steps:", "py-step1": "1. Send the <b>exact amount</b> below in USDT on TRC20", "py-step2": "2. This amount is unique to you — do not round it", "py-step3": "3. Tap \"I've paid\" after sending", "py-step4": "4. Activated automatically within seconds ⚡", "py-net": "Choose network", "py-addr": "Wallet address · TRC20 only", "py-copy": "📋 Copy address", "py-tx": "Transaction hash", "py-send": "₮ Submit activation request", "py-myorders": "My requests", "py-exact": "Send exactly this amount", "py-exact-why": "The cents identify your payment — do not change them", "py-copyamt": "📋 Copy amount", "py-warn": "⚠️ Send USDT on TRC20 only. Any other network means permanent loss.", "py-check": "✅ I've paid", "py-card-t": "💳 Card payment", "py-card1": "• Secure encrypted checkout by Chargily", "py-card2": "• EDAHABIA and CIB cards accepted", "py-card3": "• Activated automatically the moment payment succeeds ⚡", "py-total": "Total amount", "py-dzd-note2": "Charged directly to your card", "py-card-btn": "💳 Pay by card now", "py-intl": "International card", "py-intl-t": "💳 International card payment", "py-intl1": "• Visa · Mastercard · Apple Pay · Google Pay", "py-intl2": "• Activated automatically once payment succeeds ⚡", "py-intl-kyc": "⚠️ This method requires ID verification with the payment provider (ID photo + selfie), plus fees of ≈ $2 + 1.5%. If you're in Algeria, the local card is faster and cheaper.", "py-plus-fees": "+ provider fees", "py-intl-btn": "💳 Pay by international card", "pw-t": "🔑 Change password", "pw-s": "In-app — no email needed", "pw-l1": "Current password", "pw-l2": "New password", "pw-l3": "Confirm new password", "pw-hint": "At least 6 characters", "pw-btn": "🔑 Save password", "stPass": "Change password", "stPassSub": "In-app, no email", "adm-s": "Incoming payment requests", "np-t": "🔑 Set a new password", "np-note": "✅ Email verified. Choose a new password now.", "np-l1": "New password", "np-l2": "Confirm password", "np-btn": "🔑 Save and sign in", "fg-t": "🔓 Password recovery", "fg-s1": "Enter your email to receive the reset link", "fg-s2": "Check your email now", "fg-l1": "Email address", "fg-b1": "📧 Send reset link", "fg-resend": "Didn't get the code? Resend", "fg-how": "📧 We'll email you a link. Open it on this device to set a new password.", "fg-tip": "Can't find it? Check your spam folder.", "fg-resend2": "Resend", "fg-back": "Back to sign in", "adm-tab1": "Payments", "adm-tab2": "Users", "adm-total": "Total registered", "adm-week": "New this week", "ws-ph": "Ex: I want a site for a luxury perfume store called \"Nour\". Favorite colors: gold and black. A section for 4 featured perfumes, customer reviews, and a big WhatsApp button. Luxurious, calm mood...", "ws-ex1": "💡 Example: online store", "ws-ex2": "💡 Example: portfolio", "ws-ex3": "💡 Example: service page", "ap-ph": "Ex: An app for my clothing store \"Style\". Product list with photos and prices, shopping cart, order via WhatsApp. Dark blue, simple bottom nav bar...", "ap-ex1": "💡 Example: shop with cart", "ap-ex2": "💡 Example: appointment booking", "ap-ex3": "💡 Example: restaurant menu", "usdt-have": "I already have USDT", "usdt-new": "I don't know what USDT is", "usdt-what-t": "₮ What is USDT?", "usdt-what-d": "A digital currency always worth exactly $1 USD. Used for safe cross-border payments without banks.", "usdt-how-t": "📲 How to get it?", "usdt-how-1": "1. Download the <b>Binance</b> or <b>Bybit</b> app from your app store", "usdt-how-2": "2. Create an account (ID required)", "usdt-how-3": "3. Buy USDT with your bank card directly in the app", "usdt-how-4": "4. Come back here and send the required amount to our address below", "s20n": "Logo Design", "s20s": "By AI or manually", "lg-tab1": "With AI", "lg-tab2": "Manual editor", "lg-wait": "Drawing your logo... (up to 30 seconds)", "lg-again": "🔄 Generate another", "lg-m-name": "Brand name", "lg-m-icon": "Choose an icon", "lg-m-shape": "Background shape", "lg-m-layout": "Layout", "lg-m-bg": "Background color", "lg-m-fg": "Icon and text color", "lg-m-font": "Font", "lg-m-dl": "⬇️ Download PNG (high quality)", "lg-m-palette": "Ready color palettes", "lg-m-fill": "Fill style", "lg-fill-grad": "🌈 Gradient", "lg-fill-solid": "◼️ Solid color", "ws-s2": "Describe your project — we'll reach out with a fitting price", "ap-s2": "Describe your project — we'll reach out with a fitting price", "req-mine": "My previous requests", "req-status-new": "New", "req-status-discussing": "Discussing", "req-status-quoted": "Quote sent", "req-status-won": "Agreed", "req-status-closed": "Closed", "req-note-website": "Freely describe your website — name, business, colors, sections you want. We'll send you a fitting quote.", "req-note-app": "Freely describe your app — what it does, its features, its look. We'll send you a fitting quote.", "req-l1": "Describe your project in detail", "req-ph-website": "Ex: A site for a luxury perfume store \"Nour\", gold and black, with products, reviews, WhatsApp button...", "req-ph-app": "Ex: An app for my store \"Style\", products, cart, order via WhatsApp...", "req-send": "📨 Send request", "req-back": "Back to requests", "req-reply-ph": "Write your message...", "adm-tab3": "Custom requests", "adm-status": "Request status", "adm-reply-ph": "Write your reply to the customer...", "bm-tab1": "Build it yourself now", "bm-tab2": "Request a quote", "bm-policy": "🚫 Pornographic or sexual sites/content are strictly forbidden. Any such request is automatically blocked.", "bm-note-website": "Freely describe your idea as if to a designer — the more detail you give, the closer the result to your vision.", "bm-note-app": "Freely describe your app idea — what it does, how it looks, its features.", "bm-lang": "Language", "bm-build": "⚡ Build it now", "bm-wait": "Building... (may take a minute)", "bm-done": "✅ Ready! Download and publish on netlify.com/drop.", "lg-s2": "Design it yourself in seconds", "s20s2": "Design it yourself for free", "adm-tab-cx": "Merchant complaints", "stComplaint": "Complaint or issue", "stComplaintSub": "Our team reviews and replies to you", "cxform-t": "📋 Complaint or issue", "cxform-s": "Our team carefully reviews every complaint", "cxform-note": "Describe your issue clearly — our team will review it and reply here soon.", "cxform-ph": "Explain the issue in detail...", "cxform-btn": "📨 Send complaint", "cx-mine": "My previous complaints", "cx-subject-label": "Complaint subject", "cx-subject-ph": "Ex: Payment issue", "cx-msg-label": "Complaint details", "cx-status-label": "Status", "cx-status-new": "New", "cx-status-in_progress": "In progress", "cx-status-resolved": "Resolved", "cx-reply-label": "Our reply", "cx-reply-ph": "Write your reply here...", "cx-reply-btn": "💾 Save reply", "ws-chat-s": "Chat with us and we'll build it", "ap-chat-s": "Chat with us and we'll build it", "chat-build-btn": "🏗️ Build the file now", "chat-input-ph": "Type your message...", "chat-building": "Building... (may take a minute)", "builds-left": "Builds remaining in your balance:", "msg-build-limit": "⚠️ Your builds balance is empty. Buy more or renew your subscription.", "topup-offer-t": "⚡ Get 20 extra builds instantly", "topup-offer-s": "One-time payment of $10 — activated automatically", "topup-btn": "⚡ Buy 20 builds — $10", "topup-onetime": "One-time payment", "topup-success": "✅ 20 builds added instantly!", "pm-builds": "🏗️ 20 builds/month · or 240 on the yearly plan", "maxF-builds": "20 builds/month · 240 per year"}};
+
+const DIRS = { ar:'rtl', fr:'ltr', en:'ltr' };
+// اسم لغة الواجهة كما يُمرَّر للذكاء الاصطناعي
+const AI_LANG = { ar:'العربية', fr:'الفرنسية (French)', en:'الإنجليزية (English)' };
+
+function applyLang(l) {
+  if (!I18N[l]) l = 'ar';
+  lang = l;
+  localStorage.setItem('tl', l);
+  document.documentElement.lang = l;
+  document.documentElement.dir = DIRS[l];
+  document.querySelectorAll('.lang-btn').forEach(b => b.classList.toggle('active', b.dataset.lang === l));
+
+  const t = I18N[l];
+  // النصوص
+  document.querySelectorAll('[data-i18n]').forEach(el => {
+    const v = t[el.getAttribute('data-i18n')];
+    if (v !== undefined) el.textContent = v;
+  });
+  // النصوص التوضيحية داخل الحقول
+  document.querySelectorAll('[data-i18n-ph]').forEach(el => {
+    const v = t[el.getAttribute('data-i18n-ph')];
+    if (v !== undefined) el.placeholder = v;
+  });
+
+  refreshProUI();
+  if (typeof renderHist === 'function' && curTab === 'hi') renderHist();
+}
+
+document.querySelectorAll('.lang-btn').forEach(btn => btn.addEventListener('click', () => applyLang(btn.dataset.lang)));
+
+// ========== ONBOARDING ==========
+let obI = 0;
+document.getElementById('obNext').addEventListener('click', () => {
+  if (obI < 3) {
+    document.getElementById('sl' + obI).classList.add('out');
+    setTimeout(() => { document.getElementById('sl' + obI).classList.remove('active','out'); obI++; document.getElementById('sl' + obI).classList.add('active'); updateDots(); }, 320);
+    if (obI === 2) document.getElementById('obNext').textContent = '🚀 ابدأ الآن';
+  } else { finOb(); }
+});
+document.getElementById('obSkip').addEventListener('click', finOb);
+function updateDots() { document.querySelectorAll('.ob-dot').forEach((d, i) => { d.classList.toggle('active', i === obI); }); }
+function finOb() { localStorage.setItem('tob','1'); showScreen('app'); nav('h'); applyLang(lang); }
+
+// ========== INIT ==========
+window.addEventListener('load', () => {
+  // عداد الزيارات — بدون تسجيل دخول
+  setTimeout(() => {
+    // زيارات المالك لا تُحتسب حتى تبقى الأرقام صادقة
+    if (localStorage.getItem('tj_owner') !== '1') {
+      fetch(SB_URL + '/functions/v1/ai', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'apikey': SB_KEY },
+        body: JSON.stringify({ action: 'visit' })
+      }).catch(() => {});
+    }
+  }, 2000);
+  setTimeout(() => { document.getElementById('sBar').style.width = '100%'; }, 80);
+  setTimeout(() => {
+    if (catchRecoveryLink()) { openSetNewPassword(); applyLang(lang); return; }
+    if (localStorage.getItem('tob')) { showScreen('app'); nav('h'); } else { showScreen('onboarding'); }
+    applyLang(lang);
+    refreshProUI();
+    if (session) { loadProfile(); loadUsage(); }   // تحديث الاشتراك والرصيد من السحابة
+  }, 2000);
+});
+
+// إغلاق نافذة الاشتراك عند الضغط خارجها
+document.getElementById('subModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('subModal')) closeSubModal();
+});
+document.getElementById('maxModal').addEventListener('click', e => {
+  if (e.target === document.getElementById('maxModal')) closeMaxModal();
+});
+
+// ===== تنظيف Service Worker القديم =====
+// النسخة القديمة كانت تخزّن index.html للأبد وتعرض إصداراً قديماً.
+// نلغيها ونمسح ذاكرتها، ثم نسجّل الجديدة إن توفّرت.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', async () => {
+    try {
+      // 1) امسح كل الذاكرات القديمة
+      if (window.caches) {
+        const keys = await caches.keys();
+        await Promise.all(
+          keys.filter((k) => k.indexOf('tajer-v3') === -1).map((k) => caches.delete(k))
+        );
+      }
+
+      // 2) هل ملف sw.js محدَّث؟
+      let fresh = false;
+      try {
+        const res = await fetch('/sw.js?probe=' + Date.now(), { cache: 'no-store' });
+        const txt = await res.text();
+        fresh = txt.indexOf('v3-2026-08-04') !== -1;
+      } catch (_) {}
+
+      const regs = await navigator.serviceWorker.getRegistrations();
+
+      if (!fresh) {
+        // النسخة القديمة ما زالت على الخادم — ألغِ التسجيل نهائياً
+        await Promise.all(regs.map((r) => r.unregister()));
+        return;
+      }
+
+      // 3) النسخة الجديدة متوفرة — سجّلها مع تحديث تلقائي
+      const reg = await navigator.serviceWorker.register('/sw.js', { updateViaCache: 'none' });
+      reg.update().catch(() => {});
+      setInterval(() => reg.update().catch(() => {}), 30 * 60 * 1000);
+
+      reg.addEventListener('updatefound', () => {
+        const nw = reg.installing;
+        if (!nw) return;
+        nw.addEventListener('statechange', () => {
+          if (nw.state === 'installed' && navigator.serviceWorker.controller) {
+            nw.postMessage('SKIP_WAITING');
+          }
+        });
+      });
+
+      let reloaded = false;
+      navigator.serviceWorker.addEventListener('controllerchange', () => {
+        if (reloaded) return;
+        reloaded = true;
+        location.reload();
+      });
+    } catch (_) {}
+  });
+}
+
+
+// ========== ADSENSE ==========
+// الإعلان يظهر للمستخدم المجاني فقط — مشتركو برو بلا إعلانات (وعد صفحة الاشتراك)
+let __adMounted = false;
+function refreshAdSense() {
+  const box = document.getElementById('adSenseBox');
+  if (!box) return;
+  let free = true;
+  try { free = !isPro(); } catch (_) {}
+  if (typeof isAndroidApp === 'function' && isAndroidApp()) free = false;
+  if (!free) { box.style.display = 'none'; return; }
+  box.style.display = 'block';
+  if (__adMounted) return;
+  try {
+    (window.adsbygoogle = window.adsbygoogle || []).push({});
+    __adMounted = true;
+  } catch (_) {}
+}
+window.addEventListener('load', () => setTimeout(refreshAdSense, 600));
