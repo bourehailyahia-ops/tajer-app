@@ -1,0 +1,319 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex">
+<title>لوحة البائع — تاجر</title>
+<link rel="icon" href="/icon-192.png">
+<style>
+:root{--bg:#0d0f14;--panel:#151922;--line:#242a36;--text:#e8eaed;--muted:#9aa0a6;
+--gold:#C9A84C;--ok:#2ECC71;--warn:#F39C12;--r:14px}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);
+font-family:system-ui,-apple-system,'Segoe UI',sans-serif;line-height:1.7;padding-bottom:40px}
+.wrap{max-width:720px;margin:0 auto;padding:0 15px}
+header{background:linear-gradient(160deg,rgba(201,168,76,.14),var(--panel));
+border-bottom:1px solid var(--line);padding:20px 15px;margin-bottom:20px}
+.hrow{max-width:720px;margin:0 auto;display:flex;align-items:center;gap:12px}
+h1{font-size:1.15rem;margin:0;flex:1}
+h2{font-size:.85rem;color:var(--muted);margin:26px 0 10px;font-weight:600}
+a{color:var(--gold)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:15px;margin-bottom:12px}
+.stats{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.stat{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:14px;text-align:center}
+.stat b{display:block;font-size:1.3rem;color:var(--gold);margin-bottom:3px}
+.stat span{font-size:.73rem;color:var(--muted)}
+.btn{background:var(--gold);color:#12151c;border:0;border-radius:10px;padding:11px 20px;
+font-weight:700;font-size:.88rem;cursor:pointer;font-family:inherit;width:100%}
+.btn:disabled{opacity:.45;cursor:not-allowed}
+.btn2{background:transparent;color:var(--text);border:1px solid var(--line)}
+.btn-sm{width:auto;padding:7px 15px;font-size:.78rem}
+label{display:block;font-size:.78rem;color:var(--muted);margin:11px 0 5px}
+input,textarea,select{width:100%;background:#0f1218;border:1px solid var(--line);
+border-radius:10px;padding:11px;color:var(--text);font-size:.88rem;font-family:inherit}
+.row{display:flex;gap:9px}.row>*{flex:1}
+.prod{display:flex;gap:11px;align-items:flex-start;padding:13px 0;border-bottom:1px solid var(--line)}
+.prod:last-child{border-bottom:0}
+.ic{font-size:24px}
+.grow{flex:1;min-width:0}
+.pt{font-size:.9rem;font-weight:600}
+.ps{font-size:.75rem;color:var(--muted)}
+.tag{font-size:.66rem;padding:2px 9px;border-radius:20px;border:1px solid var(--line);color:var(--muted)}
+.tag.ok{color:var(--ok);border-color:rgba(46,204,113,.35)}
+.tag.wait{color:var(--warn);border-color:rgba(243,156,18,.35)}
+.msg{padding:11px 14px;border-radius:10px;font-size:.82rem;margin:11px 0}
+.msg.err{background:rgba(231,76,60,.12);color:#E74C3C}
+.msg.good{background:rgba(46,204,113,.12);color:var(--ok)}
+.muted{color:var(--muted);font-size:.82rem}
+.center{text-align:center;padding:30px 0}
+.hide{display:none}
+.link-box{background:#0f1218;border:1px solid var(--line);border-radius:10px;
+padding:10px;font-size:.74rem;word-break:break-all;color:var(--gold);margin-top:6px}
+</style>
+</head>
+<body>
+
+<header>
+  <div class="hrow">
+    <h1>لوحة البائع</h1>
+    <a href="/" style="font-size:.8rem;text-decoration:none">← تاجر</a>
+  </div>
+</header>
+
+<div class="wrap">
+  <div id="loading" class="center muted">جارٍ التحميل…</div>
+
+  <!-- غير مسجّل -->
+  <div id="noauth" class="hide center">
+    <p>سجّل الدخول من التطبيق أولاً، ثم عُد إلى هذه الصفحة.</p>
+    <a class="btn" style="display:inline-block;text-decoration:none;width:auto" href="/">فتح تاجر</a>
+  </div>
+
+  <!-- ليس بائعاً -->
+  <div id="noseller" class="hide center">
+    <p>حسابك ليس مسجّلاً كبائع بعد.</p>
+    <p class="muted">تواصل مع الإدارة لتفعيل متجرك.</p>
+  </div>
+
+  <!-- اللوحة -->
+  <div id="dash" class="hide">
+    <div class="card">
+      <div style="display:flex;align-items:center;gap:11px">
+        <div class="grow">
+          <div class="pt" id="sName">—</div>
+          <div class="ps" id="sStatus">—</div>
+        </div>
+      </div>
+      <div class="link-box" id="sLink">—</div>
+      <button class="btn btn2 btn-sm" style="margin-top:9px" onclick="copyLink()">📋 نسخ رابط متجري</button>
+    </div>
+
+    <h2>الأرباح</h2>
+    <div class="stats">
+      <div class="stat"><b id="stAvail">—</b><span>متاح للسحب</span></div>
+      <div class="stat"><b id="stPending">—</b><span>مجمّد (14 يوماً)</span></div>
+      <div class="stat"><b id="stPaid">—</b><span>حُوِّل إليك</span></div>
+      <div class="stat"><b id="stRef">—</b><span>أرباح الإحالة</span></div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <div id="payoutMsg"></div>
+      <button class="btn" id="payoutBtn" onclick="requestPayout()">💸 اطلب سحب أرباحي</button>
+      <p class="muted" style="margin:9px 0 0;font-size:.74rem">
+        الأرباح تُجمَّد 14 يوماً بعد كل عملية بيع حمايةً من الاسترجاع.
+      </p>
+      <div id="payoutList"></div>
+    </div>
+
+    <h2>بيانات التحويل</h2>
+    <div class="card">
+      <div id="payMsg"></div>
+      <label>طريقة الاستلام</label>
+      <select id="pMethod">
+        <option value="">— اختر —</option>
+        <option value="ccp">CCP — البريد</option>
+        <option value="baridimob">BaridiMob</option>
+        <option value="rib">RIB بنكي</option>
+        <option value="usdt">USDT (TRC20)</option>
+      </select>
+      <label>الرقم / العنوان</label>
+      <input id="pDetails" placeholder="رقم الحساب أو عنوان المحفظة">
+      <label>الاسم صاحب الحساب</label>
+      <input id="pName" placeholder="كما هو في الحساب">
+      <button class="btn" style="margin-top:13px" onclick="savePayout()">حفظ</button>
+    </div>
+
+    <h2>منتجاتي (<span id="pCount">0</span>)</h2>
+    <div class="card" id="prodList"><p class="muted">—</p></div>
+
+    <h2>إضافة منتج</h2>
+    <div class="card">
+      <div id="addMsg"></div>
+      <label>اسم المنتج *</label>
+      <input id="nTitle" maxlength="120" placeholder="مثال: دليل الدروبشيبينغ للمبتدئين">
+      <label>وصف مختصر</label>
+      <input id="nSub" maxlength="160" placeholder="سطر واحد يشرح الفائدة">
+      <label>الوصف الكامل</label>
+      <textarea id="nDesc" rows="4" maxlength="4000"></textarea>
+      <div class="row">
+        <div><label>السعر (دج) *</label><input id="nDzd" type="number" min="0" step="50"></div>
+        <div><label>السعر ($)</label><input id="nUsd" type="number" min="0" step="0.5"></div>
+      </div>
+      <div class="row">
+        <div><label>الصيغة</label><input id="nFmt" placeholder="PDF"></div>
+        <div><label>الحجم/الصفحات</label><input id="nPages" placeholder="120 صفحة"></div>
+      </div>
+      <label>رابط المعاينة المجانية (اختياري)</label>
+      <input id="nPrev" placeholder="https://...">
+      <button class="btn" style="margin-top:13px" onclick="addProduct()">إضافة للمراجعة</button>
+      <p class="muted" style="margin:9px 0 0;font-size:.74rem">
+        كل منتج جديد يمرّ بمراجعة الإدارة قبل الظهور في متجرك.
+      </p>
+    </div>
+  </div>
+</div>
+
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+const SB_URL = 'https://rnaqsvmtszxgbvzaagzx.supabase.co';
+const SB_KEY = 'sb_publishable_ly90vH9XsCT_05kxQenomw_LE5aCud-';
+const sb = createClient(SB_URL, SB_KEY);
+
+const $ = (id) => document.getElementById(id);
+const show = (id) => $(id).classList.remove('hide');
+const hide = (id) => $(id).classList.add('hide');
+const dz = (n) => Number(n || 0).toLocaleString('ar-DZ') + ' دج';
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const note = (el, text, kind) => {
+  $(el).innerHTML = text ? `<div class="msg ${kind || 'err'}">${esc(text)}</div>` : '';
+};
+
+let seller = null;
+
+async function init() {
+  const { data: { session } } = await sb.auth.getSession();
+  hide('loading');
+  if (!session) return show('noauth');
+
+  const { data, error } = await sb.from('sellers')
+    .select('id, slug, display_name, status, ref_code, payout_method, payout_details, payout_name')
+    .eq('user_id', session.user.id).maybeSingle();
+
+  if (error || !data) return show('noseller');
+  seller = data;
+  show('dash');
+  render();
+  loadBalances();
+  loadProducts();
+  loadPayouts();
+}
+
+function render() {
+  $('sName').textContent = seller.display_name;
+  const map = { approved: '✅ متجر مفعّل', pending: '⏳ قيد المراجعة',
+                suspended: '⛔ موقوف', rejected: '❌ مرفوض' };
+  $('sStatus').textContent = map[seller.status] || seller.status;
+  $('sLink').textContent = `${location.origin}/s/${seller.slug}`;
+  $('pMethod').value  = seller.payout_method  || '';
+  $('pDetails').value = seller.payout_details || '';
+  $('pName').value    = seller.payout_name    || '';
+}
+
+async function loadBalances() {
+  const { data } = await sb.from('seller_balances')
+    .select('*').eq('seller_id', seller.id).maybeSingle();
+  $('stAvail').textContent   = dz(data?.available_dzd);
+  $('stPending').textContent = dz(data?.pending_dzd);
+  $('stPaid').textContent    = dz(data?.paid_out_dzd);
+  $('stRef').textContent     = dz(data?.referral_earned_dzd);
+  $('payoutBtn').disabled = !(Number(data?.available_dzd) > 0);
+}
+
+async function loadProducts() {
+  const { data } = await sb.from('digital_products')
+    .select('id, title, subtitle, icon, price_dzd, price_usd, status, sales_count')
+    .eq('seller_id', seller.id).order('created_at', { ascending: false });
+  const rows = data || [];
+  $('pCount').textContent = rows.length;
+  const badge = { approved: '<span class="tag ok">منشور</span>',
+                  pending: '<span class="tag wait">قيد المراجعة</span>',
+                  draft: '<span class="tag">مسودّة</span>',
+                  rejected: '<span class="tag">مرفوض</span>',
+                  hidden: '<span class="tag">مخفي</span>' };
+  $('prodList').innerHTML = rows.length ? rows.map((p) => `
+    <div class="prod">
+      <span class="ic">${esc(p.icon || '📘')}</span>
+      <div class="grow">
+        <div class="pt">${esc(p.title)}</div>
+        <div class="ps">${dz(p.price_dzd)}${p.price_usd ? ` · $${Number(p.price_usd).toFixed(2)}` : ''}
+          ${p.sales_count > 0 ? ` · ${p.sales_count} مبيع` : ''}</div>
+        <div style="margin-top:5px">${badge[p.status] || ''}</div>
+      </div>
+    </div>`).join('') : '<p class="muted">لا منتجات بعد. أضف أوّل منتج من الأسفل.</p>';
+}
+
+async function loadPayouts() {
+  const { data } = await sb.from('payouts')
+    .select('payout_no, amount_dzd, status, created_at, sent_at')
+    .eq('seller_id', seller.id).order('created_at', { ascending: false }).limit(5);
+  const rows = data || [];
+  const st = { pending: '⏳ قيد المعالجة', processing: '⏳ جارٍ التحويل',
+               sent: '✅ حُوِّل', failed: '❌ فشل' };
+  $('payoutList').innerHTML = rows.length
+    ? '<h2 style="margin-bottom:6px">آخر طلبات السحب</h2>' + rows.map((p) => `
+      <div class="prod"><div class="grow">
+        <div class="pt">${dz(p.amount_dzd)}</div>
+        <div class="ps">#${p.payout_no} · ${st[p.status] || p.status}
+          · ${new Date(p.created_at).toLocaleDateString('ar-DZ')}</div>
+      </div></div>`).join('')
+    : '';
+}
+
+window.copyLink = async () => {
+  try { await navigator.clipboard.writeText($('sLink').textContent);
+    note('payoutMsg', 'نُسخ الرابط ✓', 'good');
+    setTimeout(() => note('payoutMsg', ''), 2000);
+  } catch (_) {}
+};
+
+window.savePayout = async () => {
+  const method = $('pMethod').value;
+  const details = $('pDetails').value.trim();
+  if (!method || !details) return note('payMsg', 'اختر الطريقة وأدخل الرقم.');
+  const { error } = await sb.from('sellers').update({
+    payout_method: method, payout_details: details, payout_name: $('pName').value.trim(),
+  }).eq('id', seller.id);
+  if (error) return note('payMsg', 'تعذّر الحفظ: ' + error.message);
+  seller.payout_method = method; seller.payout_details = details;
+  note('payMsg', 'حُفظت بياناتك ✓', 'good');
+};
+
+window.requestPayout = async () => {
+  $('payoutBtn').disabled = true;
+  const { data, error } = await sb.rpc('request_payout');
+  if (error) { note('payoutMsg', error.message); $('payoutBtn').disabled = false; return; }
+  const msg = {
+    not_a_seller: 'حسابك ليس بائعاً.',
+    seller_not_approved: 'متجرك غير مفعّل بعد.',
+    missing_payout_details: 'أدخل بيانات التحويل أولاً.',
+    payout_already_pending: 'لديك طلب سحب قيد المعالجة.',
+    below_minimum: `الحد الأدنى للسحب ${dz(data?.minimum)} — المتاح ${dz(data?.available)}.`,
+  };
+  if (!data?.ok) { note('payoutMsg', msg[data?.error] || 'تعذّر الطلب.'); $('payoutBtn').disabled = false; return; }
+  note('payoutMsg', `أُرسل طلب سحب ${dz(data.amount)} — ستصلك الحوالة قريباً.`, 'good');
+  loadBalances(); loadPayouts();
+};
+
+window.addProduct = async () => {
+  const title = $('nTitle').value.trim();
+  const dzd = Number($('nDzd').value);
+  if (title.length < 3) return note('addMsg', 'اكتب اسم المنتج (3 أحرف على الأقل).');
+  if (!(dzd > 0)) return note('addMsg', 'أدخل سعراً صحيحاً بالدينار.');
+
+  const slug = (title.toLowerCase().replace(/[^a-z0-9\u0621-\u064a]+/g, '-')
+    .replace(/^-|-$/g, '') || 'product') + '-' + Date.now().toString(36).slice(-4);
+
+  const { error } = await sb.from('digital_products').insert({
+    seller_id: seller.id, slug, title,
+    subtitle: $('nSub').value.trim() || null,
+    description: $('nDesc').value.trim() || null,
+    price_dzd: dzd,
+    price_usd: Number($('nUsd').value) || null,
+    file_format: $('nFmt').value.trim() || null,
+    pages: $('nPages').value.trim() || null,
+    preview_url: $('nPrev').value.trim() || null,
+    status: 'pending', active: false,
+  });
+  if (error) return note('addMsg', 'تعذّرت الإضافة: ' + error.message);
+  note('addMsg', 'أُرسل المنتج للمراجعة ✓', 'good');
+  ['nTitle','nSub','nDesc','nDzd','nUsd','nFmt','nPages','nPrev'].forEach((i) => { $(i).value = ''; });
+  loadProducts();
+};
+
+init().catch(() => { hide('loading'); show('noauth'); });
+</script>
+</body>
+  </html>
