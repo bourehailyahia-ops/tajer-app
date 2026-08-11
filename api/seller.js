@@ -152,9 +152,39 @@ footer{border-top:1px solid var(--line);margin-top:34px;padding:24px 16px;text-a
 .badge{display:inline-flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:10px 20px;text-decoration:none;color:var(--text);font-size:.85rem}
 .badge b{color:var(--gold)}
 .badge-note{color:var(--muted);font-size:.72rem;margin-top:11px}
+.tbar{display:flex;align-items:center;justify-content:space-between;gap:12px;
+padding:11px 16px;background:rgba(13,15,20,.92);border-bottom:1px solid var(--line);
+position:sticky;top:0;z-index:20;backdrop-filter:blur(8px)}
+.brand{display:flex;align-items:center;gap:5px;text-decoration:none}
+.logo{font-size:1.05rem;font-weight:800;color:var(--gold);letter-spacing:.5px}
+.dot{color:var(--gold);font-size:.7rem}
+.tcta{font-size:.76rem;color:var(--text);border:1px solid var(--line);
+border-radius:999px;padding:6px 15px;text-decoration:none}
+.sell{background:linear-gradient(160deg,rgba(201,168,76,.13),var(--panel));
+border-top:1px solid var(--line);border-bottom:1px solid var(--line);margin-top:32px;padding:32px 16px}
+.sell-in{max-width:560px;margin:0 auto;text-align:center}
+.sell-ic{font-size:34px}
+.sell-t{font-size:1.22rem;margin:8px 0 10px;color:var(--text)}
+.sell-p{color:var(--muted);font-size:.87rem;margin:0 0 16px}
+.sell-p b{color:var(--gold)}
+.sell-l{list-style:none;padding:0;margin:0 0 20px;text-align:start;display:inline-block}
+.sell-l li{font-size:.83rem;color:var(--muted);padding:5px 0}
+.sell-l li::before{content:"✓";color:var(--gold);font-weight:700;margin-inline-end:9px}
+.sell-btn{display:block;background:var(--gold);color:#12151c;font-weight:800;
+padding:14px;border-radius:12px;text-decoration:none;font-size:.95rem}
+.sell-n{color:var(--muted);font-size:.72rem;margin-top:10px}
 </style>
 </head>
 <body>
+
+<!-- شريط تاجر: الزائر يعرف أنه داخل المنصّة -->
+<nav class="tbar">
+  <a class="brand" href="${SITE}/?from=store&s=${esc(s.slug)}">
+    <span class="logo">تاجر</span><span class="dot">✦</span>
+  </a>
+  <a class="tcta" href="${SITE}/?from=store&s=${esc(s.slug)}">افتح المنصّة</a>
+</nav>
+
 <header>
   ${s.avatar_url ? `<img class="avatar" src="${esc(s.avatar_url)}" alt="${esc(s.display_name)}">` : ''}
   <h1>${esc(s.display_name)}</h1>
@@ -168,12 +198,32 @@ footer{border-top:1px solid var(--line);margin-top:34px;padding:24px 16px;text-a
   ${cards}
 </div>
 
+<!-- دعوة البيع: هذه هي الحلقة التي تُنمّي السوق.
+     الرابط يحمل كود إحالة البائع، فمن يسجّل منه يُنسب له. -->
+<section class="sell">
+  <div class="sell-in">
+    <div class="sell-ic">💰</div>
+    <h2 class="sell-t">بِع منتجاتك الرقمية واربح</h2>
+    <p class="sell-p">
+      عندك دليل أو قالب أو دورة؟ اعرضها على تاجر واحتفظ بـ<b>70%</b> من كل عملية بيع.
+      نعطيك صفحة متجر خاصة بك مثل هذه، ونتكفّل بالدفع والتسليم.
+    </p>
+    <ul class="sell-l">
+      <li>صفحة متجر بعنوان خاص يظهر في جوجل</li>
+      <li>الدفع بالبطاقة الجزائرية أو USDT</li>
+      <li>تحويل أرباحك على CCP أو BaridiMob</li>
+      <li>بلا رسوم اشتراك — تدفع فقط عند البيع</li>
+    </ul>
+    <a class="sell-btn" href="${esc(s.badge_url)}">ابدأ البيع مجاناً</a>
+    <p class="sell-n">مجاني بالكامل · تحتاج دقيقتين للتسجيل</p>
+  </div>
+</section>
+
 <footer>
-  <!-- لافتة الإحالة: كل زائر يدخل منها يُنسب لهذا البائع -->
   <a class="badge" href="${esc(s.badge_url)}">
     <span>مدعوم بواسطة</span><b>تاجر</b>
   </a>
-  <p class="badge-note">أنشئ متجرك الرقمي مجاناً وابدأ البيع</p>
+  <p class="badge-note">منصّة عربية للمنتجات الرقمية وأدوات التجارة الإلكترونية</p>
 </footer>
 </body>
 </html>`;
