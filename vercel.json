@@ -1,4 +1,11 @@
-{
+
+  "{
+  "rewrites": [
+    {
+      "source": "/s/:slug",
+      "destination": "/api/seller?slug=:slug"
+    }
+  ],
   "headers": [
     {
       "source": "/(.*)",
