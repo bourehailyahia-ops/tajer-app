@@ -189,26 +189,49 @@
   window.mkDownload = download;
 
   // ---------- 5) زر «متجري» ----------
+  // يوضع كعنصر في قائمة الإعدادات (صفحة الحساب) ليطابق تصميم التطبيق.
+  // سبب سابق للعطل: كان يوضع داخل proBanner وهي display:none لغير المشتركين.
   function addSellerLink() {
-    if (!sess()) return;
-    fetch(SB + '/rest/v1/sellers?select=slug,status&limit=1',
-          { headers: { apikey: KEY, Authorization: 'Bearer ' + sess().access_token } })
+    var s = sess();
+    if (!s || !s.access_token) return;
+    if (document.getElementById('mkSellerBtn')) return;
+
+    fetch(SB + '/rest/v1/sellers?select=slug,status', {
+      headers: { apikey: KEY, Authorization: 'Bearer ' + s.access_token }
+    })
       .then(function (r) { return r.json(); })
       .then(function (rows) {
-        var me = rows && rows[0];
-        if (!me || !me.slug) return;
+        // نتأكّد أن الصف يخصّ المستخدم: RLS تُرجع صفّه فقط للكتابة،
+        // لكن القراءة العامة تُرجع كل المعتمدين — فنطلب صفّه بالتحديد.
+        return fetch(SB + '/rest/v1/sellers?select=slug,status&user_id=eq.' +
+          encodeURIComponent(s.user && s.user.id ? s.user.id : ''), {
+          headers: { apikey: KEY, Authorization: 'Bearer ' + s.access_token }
+        }).then(function (r2) { return r2.json(); })
+          .then(function (mine) { return (mine && mine.length) ? mine : null; })
+          .catch(function () { return null; });
+      })
+      .then(function (rows) {
+        if (!rows || !rows[0] || !rows[0].slug) return;
         if (document.getElementById('mkSellerBtn')) return;
-        var host = document.getElementById('proCountdown') ||
-                   document.getElementById('stAbout') ||
-                   document.body;
-        var a = document.createElement('a');
-        a.id = 'mkSellerBtn';
-        a.href = '/seller-dashboard.html';
-        a.textContent = '🏪 لوحة متجري';
-        a.style.cssText = 'display:block;text-align:center;background:#151922;' +
-          'border:1px solid #C9A84C;color:#C9A84C;border-radius:12px;padding:12px;' +
-          'margin:12px 0;text-decoration:none;font-weight:700;font-size:.88rem';
-        host.parentNode ? host.parentNode.insertBefore(a, host) : host.appendChild(a);
+
+        var anchor = document.getElementById('stAbout');
+        var item = anchor ? anchor.closest('.set-item') : null;
+        if (!item || !item.parentNode) return;
+
+        var slug = rows[0].slug;
+        var el = document.createElement('div');
+        el.id = 'mkSellerBtn';
+        el.className = 'set-item';
+        el.style.cursor = 'pointer';
+        el.onclick = function () { location.href = '/seller-dashboard.html'; };
+        el.innerHTML =
+          '<div class="set-l"><div class="set-icon">🏪</div><div>' +
+          '<div class="set-name">لوحة متجري</div>' +
+          '<div class="set-sub">أرباحي · منتجاتي · /s/' + esc(slug) + '</div>' +
+          '</div></div>' +
+          '<div class="chev"><svg viewBox="0 0 24 24" stroke-width="2">' +
+          '<path d="M9 18l6-6-6-6"/></svg></div>';
+        item.parentNode.insertBefore(el, item);
       })
       .catch(function () {});
   }
@@ -222,7 +245,9 @@
       else if (q('buy') === 'ok') { afterPay(); clean(); }
       else if (q('buy') === 'fail') { toast('أُلغيت عملية الدفع.'); clean(); }
     } catch (e) {}
-    setTimeout(function () { try { addSellerLink(); } catch (e) {} }, 1500);
+    [800, 2000, 4000].forEach(function (ms) {
+      setTimeout(function () { try { addSellerLink(); } catch (e) {} }, ms);
+    });
   }
 
   if (document.readyState === 'loading') {
