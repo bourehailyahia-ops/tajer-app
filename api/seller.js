@@ -67,9 +67,21 @@ export default async function handler(req, res) {
     })),
   };
 
-  const cards = products.length ? products.map((p) => `
+  // غلاف بديل مولَّد من الأيقونة حين لا توجد صورة — يملأ الفراغ البصري
+  const palette = ['#C9A84C,#8a6f2a', '#3498db,#1f5c8b', '#2ECC71,#1c7a45',
+                   '#9b59b6,#5f3172', '#e67e22,#9c4a10', '#e74c3c,#8f2b21'];
+
+  const cards = products.length ? products.map((p, i) => {
+    const [c1, c2] = palette[i % palette.length].split(',');
+    const cover = p.cover_url
+      ? `<img class="cover" src="${esc(p.cover_url)}" alt="${esc(p.title)}" loading="lazy">`
+      : `<div class="cover gen" style="background:linear-gradient(135deg,${c1},${c2})">
+           <span class="gen-ic">${esc(p.icon || '📘')}</span>
+           <span class="gen-t">${esc(String(p.title).slice(0, 42))}</span>
+         </div>`;
+    return `
     <article class="card">
-      ${p.cover_url ? `<img class="cover" src="${esc(p.cover_url)}" alt="${esc(p.title)}" loading="lazy">` : ''}
+      ${cover}
       <div class="card-body">
         <div class="row">
           <span class="ic">${esc(p.icon || '📘')}</span>
@@ -93,7 +105,7 @@ export default async function handler(req, res) {
         </div>
         ${p.preview_url ? `<a class="prev" href="${esc(p.preview_url)}" target="_blank" rel="noopener">👁 معاينة مجانية</a>` : ''}
       </div>
-    </article>`).join('')
+    </article>`; }).join('')
     : `<p class="empty">لا توجد منتجات معروضة بعد.</p>`;
 
   const links = [
@@ -152,6 +164,23 @@ footer{border-top:1px solid var(--line);margin-top:34px;padding:24px 16px;text-a
 .badge{display:inline-flex;align-items:center;gap:9px;background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:10px 20px;text-decoration:none;color:var(--text);font-size:.85rem}
 .badge b{color:var(--gold)}
 .badge-note{color:var(--muted);font-size:.72rem;margin-top:11px}
+.chips{display:flex;gap:7px;justify-content:center;flex-wrap:wrap;margin-top:12px}
+.chip{font-size:.72rem;background:rgba(255,255,255,.05);border:1px solid var(--line);
+padding:5px 13px;border-radius:20px;color:var(--muted)}
+.chip b{color:var(--gold);font-weight:700}
+.cover.gen{height:150px;display:flex;flex-direction:column;align-items:center;
+justify-content:center;gap:9px;position:relative;overflow:hidden}
+.cover.gen::after{content:"";position:absolute;inset:0;
+background:radial-gradient(circle at 30% 20%,rgba(255,255,255,.22),transparent 60%)}
+.gen-ic{font-size:44px;filter:drop-shadow(0 3px 8px rgba(0,0,0,.35));z-index:1}
+.gen-t{font-size:.8rem;font-weight:700;color:#fff;text-align:center;padding:0 18px;
+text-shadow:0 2px 6px rgba(0,0,0,.45);z-index:1;line-height:1.4}
+.trust{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:22px}
+.ti{background:var(--panel);border:1px solid var(--line);border-radius:12px;
+padding:13px 7px;text-align:center}
+.ti span{font-size:20px;display:block}
+.ti b{display:block;font-size:.76rem;margin:5px 0 3px}
+.ti i{font-style:normal;font-size:.65rem;color:var(--muted);line-height:1.4;display:block}
 .tbar{display:flex;align-items:center;justify-content:space-between;gap:12px;
 padding:11px 16px;background:rgba(13,15,20,.92);border-bottom:1px solid var(--line);
 position:sticky;top:0;z-index:20;backdrop-filter:blur(8px)}
@@ -189,12 +218,23 @@ padding:14px;border-radius:12px;text-decoration:none;font-size:.95rem}
   ${s.avatar_url ? `<img class="avatar" src="${esc(s.avatar_url)}" alt="${esc(s.display_name)}">` : ''}
   <h1>${esc(s.display_name)}</h1>
   ${s.bio ? `<p class="bio">${esc(s.bio)}</p>` : ''}
-  <div class="meta">${products.length} منتجاً${s.total_sales_count > 0 ? ` · ${s.total_sales_count} عملية بيع` : ''}</div>
+  <div class="meta">عضو منذ ${new Date(s.created_at).getFullYear()}</div>
+  <div class="chips">
+    <span class="chip"><b>${products.length}</b> منتج</span>
+    ${s.total_sales_count > 0 ? `<span class="chip"><b>${s.total_sales_count}</b> عملية بيع</span>` : ''}
+    <span class="chip">✅ متجر موثّق</span>
+  </div>
   ${links ? `<div class="links">${links}</div>` : ''}
 </header>
 
 <div class="wrap">
-  <p class="sec">المنتجات</p>
+  <div class="trust">
+    <div class="ti"><span>⚡</span><b>تسليم فوري</b><i>الملف يصلك بعد الدفع مباشرة</i></div>
+    <div class="ti"><span>🔒</span><b>دفع آمن</b><i>بطاقة الذهبية / CIB أو USDT</i></div>
+    <div class="ti"><span>♾️</span><b>ملكية دائمة</b><i>حمّله متى شئت لمدة 30 يوماً</i></div>
+  </div>
+
+  <p class="sec">المنتجات (${products.length})</p>
   ${cards}
 </div>
 
@@ -232,4 +272,4 @@ padding:14px;border-radius:12px;text-decoration:none;font-size:.95rem}
   // كاش على الحافة مع إعادة تحقّق — الصفحة سريعة والتحديث يظهر خلال دقيقة
   res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=600');
   res.status(200).send(html);
-}
+    }
