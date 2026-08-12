@@ -17,6 +17,48 @@
     try { return JSON.parse(localStorage.getItem('tajer_session') || 'null'); }
     catch (e) { return null; }
   }
+
+  // هل انتهت صلاحية الرمز؟ (رموز سوبابيس تنتهي بعد ساعة)
+  function expired(tok) {
+    try {
+      var p = JSON.parse(atob(tok.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      return !p.exp || (p.exp * 1000 - 60000) < Date.now();   // هامش دقيقة
+    } catch (e) { return false; }   // تعذّر التحليل: نجرّب الرمز كما هو
+  }
+
+  // تجديد الجلسة. التطبيق لا يجدّدها، فأي طلب موثّق يفشل بعد ساعة.
+  var refreshing = null;
+  function freshSession() {
+    var s = sess();
+    if (!s || !s.access_token) return Promise.resolve(null);
+    if (!expired(s.access_token)) return Promise.resolve(s);
+    return forceRefresh().then(function (ns) { return ns || s; });
+  }
+
+  function forceRefresh() {
+    var s = sess();
+    if (!s || !s.refresh_token) return Promise.resolve(null);
+    if (refreshing) return refreshing;
+
+    refreshing = fetch(SB + '/auth/v1/token?grant_type=refresh_token', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: KEY },
+      body: JSON.stringify({ refresh_token: s.refresh_token })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        if (!d || !d.access_token) return null;
+        var ns = { access_token: d.access_token,
+                   refresh_token: d.refresh_token || s.refresh_token,
+                   user: d.user || s.user };
+        try { localStorage.setItem('tajer_session', JSON.stringify(ns)); } catch (e) {}
+        return ns;
+      })
+      .catch(function () { return null; })
+      .then(function (v) { refreshing = null; return v; });
+
+    return refreshing;
+  }
   function toast(m) {
     if (typeof window.showToast === 'function') { window.showToast(m); return; }
     alert(m);
@@ -27,19 +69,38 @@
     });
   }
   function call(action, payload) {
-    var s = sess();
-    var h = { 'Content-Type': 'application/json', 'apikey': KEY };
-    h['Authorization'] = 'Bearer ' + ((s && s.access_token) ? s.access_token : KEY);
-    var body = { action: action };
-    for (var k in (payload || {})) body[k] = payload[k];
-    return fetch(FN, { method: 'POST', headers: h, body: JSON.stringify(body) })
-      .then(function (r) { return r.json().catch(function () { return {}; }); });
+    return freshSession().then(function (s) {
+      var h = { 'Content-Type': 'application/json', 'apikey': KEY };
+      h['Authorization'] = 'Bearer ' + ((s && s.access_token) ? s.access_token : KEY);
+      var body = { action: action };
+      for (var k in (payload || {})) body[k] = payload[k];
+      return fetch(FN, { method: 'POST', headers: h, body: JSON.stringify(body) })
+        .then(function (r) { return r.json().catch(function () { return {}; }); });
+    });
   }
   function q(name) {
     return new URLSearchParams(location.search).get(name);
   }
   function clean() {
     try { history.replaceState({}, '', location.pathname); } catch (e) {}
+  }
+
+  // طلب موثّق: يعيد المحاولة مرة واحدة بعد تجديد الجلسة عند الرفض
+  function authFetch(url) {
+    return freshSession().then(function (s) {
+      if (!s || !s.access_token) return null;
+      var go = function (tok) {
+        return fetch(url, { headers: { apikey: KEY, Authorization: 'Bearer ' + tok } });
+      };
+      return go(s.access_token).then(function (r) {
+        if (r.ok) return r.json();
+        if (r.status !== 401 && r.status !== 403) return null;
+        return forceRefresh().then(function (ns) {
+          if (!ns) return null;
+          return go(ns.access_token).then(function (r2) { return r2.ok ? r2.json() : null; });
+        });
+      });
+    }).catch(function () { return null; });
   }
 
   // ---------- نافذة بسيطة ----------
@@ -192,24 +253,12 @@
   // يوضع كعنصر في قائمة الإعدادات (صفحة الحساب) ليطابق تصميم التطبيق.
   // سبب سابق للعطل: كان يوضع داخل proBanner وهي display:none لغير المشتركين.
   function addSellerLink() {
-    var s = sess();
-    if (!s || !s.access_token) return;
     if (document.getElementById('mkSellerBtn')) return;
 
-    fetch(SB + '/rest/v1/sellers?select=slug,status', {
-      headers: { apikey: KEY, Authorization: 'Bearer ' + s.access_token }
-    })
-      .then(function (r) { return r.json(); })
-      .then(function (rows) {
-        // نتأكّد أن الصف يخصّ المستخدم: RLS تُرجع صفّه فقط للكتابة،
-        // لكن القراءة العامة تُرجع كل المعتمدين — فنطلب صفّه بالتحديد.
-        return fetch(SB + '/rest/v1/sellers?select=slug,status&user_id=eq.' +
-          encodeURIComponent(s.user && s.user.id ? s.user.id : ''), {
-          headers: { apikey: KEY, Authorization: 'Bearer ' + s.access_token }
-        }).then(function (r2) { return r2.json(); })
-          .then(function (mine) { return (mine && mine.length) ? mine : null; })
-          .catch(function () { return null; });
-      })
+    var s0 = sess();
+    if (!s0 || !s0.user || !s0.user.id) return;
+    authFetch(SB + '/rest/v1/sellers?select=slug,status&user_id=eq.' +
+      encodeURIComponent(s0.user.id))
       .then(function (rows) {
         if (!rows || !rows[0] || !rows[0].slug) return;
         if (document.getElementById('mkSellerBtn')) return;
@@ -218,7 +267,6 @@
         var item = anchor ? anchor.closest('.set-item') : null;
         if (!item || !item.parentNode) return;
 
-        var slug = rows[0].slug;
         var el = document.createElement('div');
         el.id = 'mkSellerBtn';
         el.className = 'set-item';
@@ -227,7 +275,7 @@
         el.innerHTML =
           '<div class="set-l"><div class="set-icon">🏪</div><div>' +
           '<div class="set-name">لوحة متجري</div>' +
-          '<div class="set-sub">أرباحي · منتجاتي · /s/' + esc(slug) + '</div>' +
+          '<div class="set-sub">أرباحي · منتجاتي · /s/' + esc(rows[0].slug) + '</div>' +
           '</div></div>' +
           '<div class="chev"><svg viewBox="0 0 24 24" stroke-width="2">' +
           '<path d="M9 18l6-6-6-6"/></svg></div>';
