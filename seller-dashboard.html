@@ -173,17 +173,72 @@ const note = (el, text, kind) => {
 
 let seller = null;
 
+// التطبيق يحفظ الجلسة في tajer_session، بينما مكتبة سوبابيس تبحث
+// عن مفتاح آخر خاص بها. لذلك نقرأ جلسة التطبيق ونحقنها في المكتبة.
+async function appSession() {
+  let raw = null;
+  try { raw = JSON.parse(localStorage.getItem('tajer_session') || 'null'); } catch (_) {}
+  if (!raw || !raw.access_token) return null;
+
+  // تجديد الرمز إن انتهت صلاحيته (التطبيق لا يجدّده تلقائياً)
+  const dead = (t) => {
+    try {
+      const p = JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      return !p.exp || (p.exp * 1000 - 60000) < Date.now();
+    } catch (_) { return false; }
+  };
+  if (dead(raw.access_token) && raw.refresh_token) {
+    try {
+      const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', apikey: SB_KEY },
+        body: JSON.stringify({ refresh_token: raw.refresh_token }),
+      });
+      const d = await r.json();
+      if (d && d.access_token) {
+        raw = { access_token: d.access_token,
+                refresh_token: d.refresh_token || raw.refresh_token,
+                user: d.user || raw.user };
+        localStorage.setItem('tajer_session', JSON.stringify(raw));
+      }
+    } catch (_) {}
+  }
+
+  try {
+    const { data, error } = await sb.auth.setSession({
+      access_token: raw.access_token,
+      refresh_token: raw.refresh_token || '',
+    });
+    if (!error && data && data.session) return data.session;
+  } catch (_) {}
+
+  // إن رفضت المكتبة الجلسة، نكتفي ببيانات المستخدم من التطبيق
+  return raw.user && raw.user.id ? { user: raw.user } : null;
+}
+
 async function init() {
-  const { data: { session } } = await sb.auth.getSession();
+  const session = await appSession();
   hide('loading');
-  if (!session) return show('noauth');
+  if (!session || !session.user) return show('noauth');
 
   const { data, error } = await sb.from('sellers')
-    .select('id, slug, display_name, status, ref_code, payout_method, payout_details, payout_name')
+    .select('id, slug, display_name, status, ref_code')
     .eq('user_id', session.user.id).maybeSingle();
 
   if (error || !data) return show('noseller');
   seller = data;
+
+  // بيانات الدفع تُقرأ عبر دالّة مخصّصة: أعمدة CCP/BaridiMob
+  // محجوبة عن القراءة المباشرة حتى لا يقرأها بائع آخر.
+  try {
+    const { data: pay } = await sb.rpc('my_payout_info');
+    if (pay) {
+      seller.payout_method  = pay.payout_method;
+      seller.payout_details = pay.payout_details;
+      seller.payout_name    = pay.payout_name;
+    }
+  } catch (_) {}
+
   show('dash');
   render();
   loadBalances();
@@ -316,4 +371,4 @@ window.addProduct = async () => {
 init().catch(() => { hide('loading'); show('noauth'); });
 </script>
 </body>
-  </html>
+        </html>
