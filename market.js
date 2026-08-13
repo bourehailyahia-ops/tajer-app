@@ -343,7 +343,28 @@
   }
 
   // ---------- التشغيل ----------
+  // إصلاح التوقّف: التطبيق لا يجدّد رمز الجلسة، فبعد ساعة يفشل
+  // /auth/v1/user بـ403 و/profiles بـ401 ويعلق. نجدّد الرمز مبكراً،
+  // وإن كان منتهياً نعيد تحميل الصفحة مرة واحدة ليبدأ التطبيق برمز صالح.
+  function healSession() {
+    var s = sess();
+    if (!s || !s.access_token || !s.refresh_token) return;
+    if (!expired(s.access_token)) return;
+
+    var GUARD = 'tj_healed';
+    var already = false;
+    try { already = sessionStorage.getItem(GUARD) === '1'; } catch (e) {}
+    if (already) return;                      // لا نعيد التحميل أكثر من مرة
+
+    forceRefresh().then(function (ns) {
+      if (!ns) return;
+      try { sessionStorage.setItem(GUARD, '1'); } catch (e) {}
+      location.reload();
+    }).catch(function () {});
+  }
+
   function start() {
+    try { healSession(); } catch (e) {}
     try { captureRef(); } catch (e) {}
     try { claimRef(); } catch (e) {}
     try {
@@ -363,7 +384,13 @@
     // مراقبة تسجيل الدخول: المستخدم قد يفتح الصفحة وهو غير مسجّل ثم
     // يسجّل الدخول لاحقاً — وبلا هذه المراقبة لا يُعاد الفحص أبداً.
     var lastToken = null;
-    try { var s0 = sess(); lastToken = s0 && s0.access_token; } catch (e) {}
+    try {
+      var s0 = sess();
+      lastToken = s0 && s0.access_token;
+      if (s0 && s0.access_token && !expired(s0.access_token)) {
+        sessionStorage.removeItem('tj_healed');
+      }
+    } catch (e) {}
 
     var watcher = setInterval(function () {
       try { addAdminLink(); } catch (e) {}
