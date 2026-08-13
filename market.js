@@ -252,45 +252,27 @@
   // ---------- 5) زر «متجري» ----------
   // يوضع كعنصر في قائمة الإعدادات (صفحة الحساب) ليطابق تصميم التطبيق.
   // سبب سابق للعطل: كان يوضع داخل proBanner وهي display:none لغير المشتركين.
-  // تشخيص: افتح الرابط ‎?mkdebug=1‎ لترى أين يتوقّف الأمر بالضبط
-  var DBG = false;
-  try { DBG = new URLSearchParams(location.search).get('mkdebug') === '1'; } catch (e) {}
-  var steps = [];
-  function dbg(m) {
-    if (!DBG) return;
-    steps.push(m);
-    var box = document.getElementById('mkDbg');
-    if (!box) {
-      box = document.createElement('div');
-      box.id = 'mkDbg';
-      box.style.cssText = 'position:fixed;bottom:0;inset-inline:0;z-index:99999;' +
-        'background:#000;color:#0f0;font:12px monospace;padding:10px;max-height:45vh;' +
-        'overflow:auto;direction:ltr;border-top:2px solid #0f0';
-      document.body.appendChild(box);
-    }
-    box.textContent = steps.join('\n');
-  }
-
   function addSellerLink() {
-    if (document.getElementById('mkSellerBtn')) { dbg('already added'); return; }
+    if (document.getElementById('mkSellerBtn')) return;
 
     var s0 = sess();
-    dbg('session=' + (s0 ? 'yes' : 'NO') +
-        ' token=' + (s0 && s0.access_token ? 'yes' : 'NO') +
-        ' userId=' + (s0 && s0.user && s0.user.id ? s0.user.id.slice(0, 8) : 'NO'));
-    if (!s0 || !s0.user || !s0.user.id) { dbg('STOP: no user id in session'); return; }
+    if (!s0 || !s0.user || !s0.user.id) return;
 
     authFetch(SB + '/rest/v1/sellers?select=slug,status&user_id=eq.' +
       encodeURIComponent(s0.user.id))
       .then(function (rows) {
-        dbg('rows=' + JSON.stringify(rows));
-        if (!rows || !rows[0] || !rows[0].slug) { dbg('STOP: no seller row'); return; }
+        if (!rows || !rows[0] || !rows[0].slug) return;
         if (document.getElementById('mkSellerBtn')) return;
 
-        var anchor = document.getElementById('stAbout');
-        var item = anchor ? anchor.closest('.set-item') : null;
-        dbg('anchor=' + (anchor ? 'yes' : 'NO') + ' item=' + (item ? 'yes' : 'NO'));
-        if (!item || !item.parentNode) { dbg('STOP: anchor not found'); return; }
+        // أعلى القائمة. كان يوضع قبل «عن التطبيق» وهو آخر عنصر،
+        // فيقع في أسفل الشاشة ولا يراه المستخدم.
+        var item = document.getElementById('authRow')
+                || document.getElementById('adminRow');
+        if (!item) {
+          var anchor = document.getElementById('stAbout');
+          item = anchor ? anchor.closest('.set-item') : null;
+        }
+        if (!item || !item.parentNode) return;
 
         var el = document.createElement('div');
         el.id = 'mkSellerBtn';
@@ -305,9 +287,8 @@
           '<div class="chev"><svg viewBox="0 0 24 24" stroke-width="2">' +
           '<path d="M9 18l6-6-6-6"/></svg></div>';
         item.parentNode.insertBefore(el, item);
-        dbg('OK: button inserted');
       })
-      .catch(function (e) { dbg('ERROR: ' + e); });
+      .catch(function () {});
   }
 
   // ---------- التشغيل ----------
