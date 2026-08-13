@@ -47,6 +47,20 @@ cursor:pointer;font-family:inherit}
 .pill{display:inline-block;font-size:.66rem;border:1px solid var(--line);
 border-radius:20px;padding:2px 9px;color:var(--muted);margin-inline-end:5px}
 a.lk{color:var(--gold);font-size:.74rem}
+.frow{display:flex;align-items:center;gap:10px;margin-bottom:9px}
+.flabel{font-size:.78rem;width:112px;flex-shrink:0}
+.fbar{flex:1;background:#0f1218;border-radius:6px;height:22px;overflow:hidden;position:relative}
+.ffill{height:100%;background:linear-gradient(90deg,var(--gold),#8a6f2a);
+display:flex;align-items:center;justify-content:flex-end;padding-inline-end:7px;
+font-size:.68rem;font-weight:700;color:#12151c;min-width:26px}
+.fpct{font-size:.7rem;color:var(--muted);width:44px;text-align:end;flex-shrink:0}
+.hint{background:rgba(243,156,18,.1);border:1px solid rgba(243,156,18,.3);
+border-radius:10px;padding:11px 13px;font-size:.8rem;color:var(--warn);margin-top:12px;line-height:1.8}
+.hint b{color:var(--text)}
+.ftbl{width:100%;font-size:.74rem;margin-top:14px;border-collapse:collapse}
+.ftbl th{color:var(--muted);font-weight:600;text-align:start;padding:5px 4px;
+border-bottom:1px solid var(--line)}
+.ftbl td{padding:6px 4px;border-bottom:1px solid var(--line)}
 </style>
 </head>
 <body>
@@ -76,6 +90,12 @@ a.lk{color:var(--gold);font-size:.74rem}
       <div class="st"><b id="kPlatform">—</b><span>أرباحك</span></div>
       <div class="st"><b id="kOwed">—</b><span>مستحق للبائعين</span></div>
       <div class="st"><b id="kClicks">—</b><span>نقرة إحالة</span></div>
+    </div>
+
+    <h2>🔎 قِمع الشراء — آخر 30 يوماً</h2>
+    <div class="card">
+      <div id="funnel"><p class="empty">جارٍ التحميل…</p></div>
+      <div id="funnelHint"></div>
     </div>
 
     <h2>طلبات فتح متجر <span class="n" id="nSellers">0</span></h2>
@@ -136,6 +156,56 @@ async function appSession() {
   return raw.user && raw.user.id ? { user: raw.user } : null;
 }
 
+async function loadFunnel() {
+  const { data, error } = await sb.rpc('funnel_report', { p_days: 30 });
+  if (error || !data || data.error) { $('funnel').innerHTML = '<p class="empty">—</p>'; return; }
+
+  const st = data.steps || {};
+  const g = (k) => Number(st[k] || 0);
+  // ترتيب القِمع من الأوسع للأضيق
+  const stages = [
+    ['زار متجراً',      g('view_store')],
+    ['فتح منتجاً',      g('view_product')],
+    ['ضغط شراء',        g('click_buy')],
+    ['وصل بوابة الدفع', g('gateway_opened')],
+    ['أتمّ الدفع',      g('paid')],
+    ['حمّل الملف',      g('download')],
+  ];
+  const top = Math.max(...stages.map((x) => x[1]), 1);
+
+  $('funnel').innerHTML = stages.map(([label, n]) => {
+    const w = Math.max((n / top) * 100, n > 0 ? 6 : 0);
+    const pct = top > 0 ? Math.round((n / top) * 100) : 0;
+    return `<div class="frow">
+      <span class="flabel">${label}</span>
+      <div class="fbar"><div class="ffill" style="width:${w}%">${n || ''}</div></div>
+      <span class="fpct">${pct}%</span>
+    </div>`;
+  }).join('') + (data.unique_visitors
+    ? `<p class="muted" style="font-size:.72rem;margin-top:8px">${data.unique_visitors} زائراً مختلفاً</p>` : '');
+
+  // التشخيص: أين التسرّب الأكبر؟
+  let hint = '';
+  const clicks = g('click_buy'), gw = g('gateway_opened'), paid = g('paid');
+  if (g('view_product') === 0 && g('view_store') > 0) {
+    hint = '<b>الزوّار يصلون المتجر ولا يفتحون أي منتج.</b> المشكلة في العرض: الأغلفة أو العناوين أو الأسعار.';
+  } else if (clicks > 0 && gw === 0) {
+    hint = '<b>يضغطون شراء ولا يصلون بوابة الدفع إطلاقاً.</b> هذا عطل تقني، لا تسويقي — راجع أسباب الفشل أدناه.';
+  } else if (gw > 0 && paid === 0) {
+    hint = '<b>يصلون البوابة ولا يكملون الدفع.</b> غالباً السعر، أو صعوبة الدفع، أو غياب الثقة.';
+  } else if (g('view_product') > 0 && clicks === 0) {
+    hint = '<b>يفتحون المنتج ولا يضغطون شراء.</b> الوصف أو السعر لا يقنع.';
+  } else if (paid > 0 && g('download') < paid) {
+    hint = '<b>دفعوا ولم يحمّلوا الملف.</b> راجع التسليم فوراً — هذا يفقدك ثقة المشتري.';
+  }
+  const fails = data.failures || [];
+  const failHtml = fails.length
+    ? `<table class="ftbl"><tr><th>سبب الفشل</th><th>مرات</th></tr>` +
+      fails.map((f) => `<tr><td>${esc(f.detail)}</td><td>${f.n}</td></tr>`).join('') + '</table>'
+    : '';
+  $('funnelHint').innerHTML = (hint ? `<div class="hint">${hint}</div>` : '') + failHtml;
+}
+
 async function load() {
   const { data, error } = await sb.rpc('admin_overview');
   if (error || !data || data.error) { hide('loading'); return show('denied'); }
@@ -152,6 +222,7 @@ async function load() {
   renderSellers(data.sellers_pending || []);
   renderProducts(data.products_pending || []);
   renderPayouts(data.payouts_pending || []);
+  loadFunnel();
 }
 
 function renderSellers(rows) {
@@ -262,4 +333,4 @@ window.markPayout = async (id, status) => {
 })().catch(() => { hide('loading'); show('denied'); });
 </script>
 </body>
-</html>
+  </html>
