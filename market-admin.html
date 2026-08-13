@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>إدارة السوق — تاجر</title>
+<link rel="icon" href="/icon-192.png">
+<style>
+:root{--bg:#0d0f14;--panel:#151922;--line:#242a36;--text:#e8eaed;--muted:#9aa0a6;
+--gold:#C9A84C;--ok:#2ECC71;--err:#E74C3C;--warn:#F39C12}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);line-height:1.7;
+font-family:system-ui,-apple-system,'Segoe UI',sans-serif;padding-bottom:40px}
+.tbar{display:flex;align-items:center;justify-content:space-between;padding:12px 16px;
+background:linear-gradient(160deg,rgba(201,168,76,.14),var(--panel));
+border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+.tbar b{font-size:1rem}
+.tbar a{font-size:.76rem;color:var(--text);border:1px solid var(--line);
+border-radius:999px;padding:6px 14px;text-decoration:none}
+.wrap{max-width:680px;margin:0 auto;padding:16px}
+h2{font-size:.85rem;color:var(--muted);margin:24px 0 10px;font-weight:600;
+display:flex;align-items:center;gap:8px}
+.n{background:var(--gold);color:#12151c;border-radius:20px;padding:1px 9px;font-size:.7rem;font-weight:800}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:9px}
+.st{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:13px;text-align:center}
+.st b{display:block;font-size:1.15rem;color:var(--gold)}
+.st span{font-size:.7rem;color:var(--muted)}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:15px;margin-bottom:11px}
+.ttl{font-size:.95rem;font-weight:700}
+.sub{font-size:.76rem;color:var(--muted);margin-top:2px}
+.kv{font-size:.76rem;color:var(--muted);margin-top:7px;word-break:break-all}
+.kv b{color:var(--text);font-weight:600}
+.acts{display:flex;gap:8px;margin-top:12px}
+.b{flex:1;border:0;border-radius:9px;padding:10px;font-weight:700;font-size:.8rem;
+cursor:pointer;font-family:inherit}
+.b.ok{background:var(--ok);color:#0b2417}
+.b.no{background:transparent;color:var(--err);border:1px solid rgba(231,76,60,.4)}
+.b.gold{background:var(--gold);color:#12151c}
+.b:disabled{opacity:.45;cursor:not-allowed}
+.empty{color:var(--muted);font-size:.82rem;text-align:center;padding:20px 0}
+.msg{padding:11px 14px;border-radius:10px;font-size:.82rem;margin:11px 0}
+.msg.err{background:rgba(231,76,60,.12);color:var(--err)}
+.msg.good{background:rgba(46,204,113,.12);color:var(--ok)}
+.center{text-align:center;padding:40px 16px}
+.hide{display:none}
+.pill{display:inline-block;font-size:.66rem;border:1px solid var(--line);
+border-radius:20px;padding:2px 9px;color:var(--muted);margin-inline-end:5px}
+a.lk{color:var(--gold);font-size:.74rem}
+</style>
+</head>
+<body>
+
+<div class="tbar">
+  <b>🛠️ إدارة السوق</b>
+  <a href="/">← تاجر</a>
+</div>
+
+<div class="wrap">
+  <div id="loading" class="center" style="color:var(--muted)">جارٍ التحميل…</div>
+
+  <div id="denied" class="hide center">
+    <div style="font-size:34px">🔒</div>
+    <h3 style="margin:8px 0">هذه الصفحة للإدارة فقط</h3>
+    <p style="color:var(--muted);font-size:.85rem">سجّل الدخول بحساب المالك من التطبيق.</p>
+    <a href="/" style="color:var(--gold)">العودة إلى تاجر</a>
+  </div>
+
+  <div id="panel" class="hide">
+    <div id="msg"></div>
+
+    <div class="stats">
+      <div class="st"><b id="kSellers">—</b><span>بائع مفعّل</span></div>
+      <div class="st"><b id="kProducts">—</b><span>منتج منشور</span></div>
+      <div class="st"><b id="kOrders">—</b><span>عملية بيع</span></div>
+      <div class="st"><b id="kPlatform">—</b><span>أرباحك</span></div>
+      <div class="st"><b id="kOwed">—</b><span>مستحق للبائعين</span></div>
+      <div class="st"><b id="kClicks">—</b><span>نقرة إحالة</span></div>
+    </div>
+
+    <h2>طلبات فتح متجر <span class="n" id="nSellers">0</span></h2>
+    <div id="sellers"></div>
+
+    <h2>منتجات بانتظار المراجعة <span class="n" id="nProducts">0</span></h2>
+    <div id="products"></div>
+
+    <h2>طلبات سحب الأرباح <span class="n" id="nPayouts">0</span></h2>
+    <div id="payouts"></div>
+  </div>
+</div>
+
+<script type="module">
+import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
+
+const SB_URL = 'https://rnaqsvmtszxgbvzaagzx.supabase.co';
+const SB_KEY = 'sb_publishable_ly90vH9XsCT_05kxQenomw_LE5aCud-';
+const sb = createClient(SB_URL, SB_KEY);
+
+const $ = (id) => document.getElementById(id);
+const show = (id) => $(id).classList.remove('hide');
+const hide = (id) => $(id).classList.add('hide');
+const dz = (n) => Number(n || 0).toLocaleString('ar-DZ') + ' دج';
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g,
+  (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const note = (t, k) => { $('msg').innerHTML = t ? `<div class="msg ${k || 'err'}">${esc(t)}</div>` : ''; };
+const day = (d) => new Date(d).toLocaleDateString('ar-DZ');
+
+async function appSession() {
+  let raw = null;
+  try { raw = JSON.parse(localStorage.getItem('tajer_session') || 'null'); } catch (_) {}
+  if (!raw || !raw.access_token) return null;
+  const dead = (t) => {
+    try {
+      const p = JSON.parse(atob(t.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));
+      return !p.exp || (p.exp * 1000 - 60000) < Date.now();
+    } catch (_) { return false; }
+  };
+  if (dead(raw.access_token) && raw.refresh_token) {
+    try {
+      const r = await fetch(`${SB_URL}/auth/v1/token?grant_type=refresh_token`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json', apikey: SB_KEY },
+        body: JSON.stringify({ refresh_token: raw.refresh_token }) });
+      const d = await r.json();
+      if (d && d.access_token) {
+        raw = { access_token: d.access_token,
+                refresh_token: d.refresh_token || raw.refresh_token, user: d.user || raw.user };
+        localStorage.setItem('tajer_session', JSON.stringify(raw));
+      }
+    } catch (_) {}
+  }
+  try {
+    const { data } = await sb.auth.setSession({
+      access_token: raw.access_token, refresh_token: raw.refresh_token || '' });
+    if (data && data.session) return data.session;
+  } catch (_) {}
+  return raw.user && raw.user.id ? { user: raw.user } : null;
+}
+
+async function load() {
+  const { data, error } = await sb.rpc('admin_overview');
+  if (error || !data || data.error) { hide('loading'); return show('denied'); }
+  hide('loading'); show('panel');
+
+  const s = data.stats || {};
+  $('kSellers').textContent  = s.sellers_active ?? 0;
+  $('kProducts').textContent = s.products_live ?? 0;
+  $('kOrders').textContent   = s.orders_paid ?? 0;
+  $('kPlatform').textContent = dz(s.platform_dzd);
+  $('kOwed').textContent     = dz(s.owed_dzd);
+  $('kClicks').textContent   = s.clicks_count ?? 0;
+
+  renderSellers(data.sellers_pending || []);
+  renderProducts(data.products_pending || []);
+  renderPayouts(data.payouts_pending || []);
+}
+
+function renderSellers(rows) {
+  $('nSellers').textContent = rows.length;
+  $('sellers').innerHTML = rows.length ? rows.map((r) => `
+    <div class="card" id="sc_${r.id}">
+      <div class="ttl">${esc(r.display_name)}</div>
+      <div class="sub">/s/${esc(r.slug)} · ${esc(r.email || '')}</div>
+      ${r.bio ? `<div class="kv">${esc(r.bio)}</div>` : ''}
+      <div class="kv">
+        ${r.whatsapp ? `<span class="pill">📱 ${esc(r.whatsapp)}</span>` : ''}
+        ${r.payout_method ? `<span class="pill">💸 ${esc(r.payout_method)}: ${esc(r.payout_details || '—')}</span>` : ''}
+        <span class="pill">${day(r.created_at)}</span>
+      </div>
+      <div class="acts">
+        <button class="b ok" onclick="setSeller('${r.id}','approved')">✓ اعتماد</button>
+        <button class="b no" onclick="setSeller('${r.id}','rejected')">✕ رفض</button>
+      </div>
+    </div>`).join('') : '<p class="empty">لا طلبات جديدة.</p>';
+}
+
+function renderProducts(rows) {
+  $('nProducts').textContent = rows.length;
+  $('products').innerHTML = rows.length ? rows.map((r) => `
+    <div class="card" id="pc_${r.id}">
+      <div class="ttl">${esc(r.title)}</div>
+      <div class="sub">${esc(r.seller_name)} · /s/${esc(r.seller_slug)}</div>
+      ${r.subtitle ? `<div class="kv">${esc(r.subtitle)}</div>` : ''}
+      ${r.description ? `<div class="kv">${esc(String(r.description).slice(0, 300))}</div>` : ''}
+      <div class="kv">
+        <span class="pill">${dz(r.price_dzd)}</span>
+        ${r.price_usd ? `<span class="pill">$${Number(r.price_usd).toFixed(2)}</span>` : ''}
+        ${r.file_format ? `<span class="pill">${esc(r.file_format)}</span>` : ''}
+      </div>
+      ${r.preview_url ? `<a class="lk" href="${esc(r.preview_url)}" target="_blank" rel="noopener">👁 معاينة الملف</a>` : ''}
+      <div class="acts">
+        <button class="b ok" onclick="setProduct('${r.id}','approved')">✓ نشر</button>
+        <button class="b no" onclick="setProduct('${r.id}','rejected')">✕ رفض</button>
+      </div>
+    </div>`).join('') : '<p class="empty">لا منتجات بانتظار المراجعة.</p>';
+}
+
+function renderPayouts(rows) {
+  $('nPayouts').textContent = rows.length;
+  $('payouts').innerHTML = rows.length ? rows.map((r) => `
+    <div class="card" id="yc_${r.id}">
+      <div class="ttl">${dz(r.amount_dzd)}</div>
+      <div class="sub">${esc(r.seller_name)} · ${r.orders_count} عملية · #${r.payout_no}</div>
+      <div class="kv">
+        <b>${esc(r.method)}</b>: ${esc(r.details || '—')}
+        ${r.payout_name ? `<br>باسم: <b>${esc(r.payout_name)}</b>` : ''}
+        <br><span class="pill">${day(r.created_at)}</span>
+        <span class="pill">${r.status === 'processing' ? 'جارٍ التحويل' : 'بانتظار'}</span>
+      </div>
+      <div class="acts">
+        <button class="b gold" onclick="markPayout('${r.id}','sent')">✓ حوّلتُ المبلغ</button>
+        <button class="b no" onclick="markPayout('${r.id}','failed')">✕ فشل</button>
+      </div>
+    </div>`).join('') : '<p class="empty">لا طلبات سحب.</p>';
+}
+
+async function act(fn, args, okMsg) {
+  const { data, error } = await sb.rpc(fn, args);
+  if (error || !data || !data.ok) {
+    note('تعذّر التنفيذ: ' + (error?.message || data?.error || 'خطأ')); return false;
+  }
+  note(okMsg, 'good');
+  setTimeout(() => note(''), 2500);
+  await load();
+  return true;
+}
+
+window.setSeller = async (id, status) => {
+  let reason = null;
+  if (status === 'rejected') {
+    reason = prompt('سبب الرفض (يُعرض للبائع):', '');
+    if (reason === null) return;
+  }
+  await act('admin_set_seller', { p_id: id, p_status: status, p_reason: reason },
+    status === 'approved' ? 'اعتُمد المتجر ✓' : 'رُفض الطلب');
+};
+
+window.setProduct = async (id, status) => {
+  let reason = null;
+  if (status === 'rejected') {
+    reason = prompt('سبب الرفض (يُعرض للبائع):', '');
+    if (reason === null) return;
+  }
+  await act('admin_set_product', { p_id: id, p_status: status, p_reason: reason },
+    status === 'approved' ? 'نُشر المنتج ✓' : 'رُفض المنتج');
+};
+
+window.markPayout = async (id, status) => {
+  let ref = null;
+  if (status === 'sent') {
+    ref = prompt('رقم الحوالة (اختياري):', '');
+    if (ref === null) return;
+    if (!confirm('تأكيد: هل حوّلت المبلغ فعلاً؟')) return;
+  } else if (!confirm('تسجيل الفشل سيعيد المبالغ لرصيد البائع. متابعة؟')) return;
+  await act('admin_mark_payout', { p_id: id, p_status: status, p_reference: ref || null },
+    status === 'sent' ? 'سُجّل التحويل ✓' : 'سُجّل الفشل');
+};
+
+(async () => {
+  const s = await appSession();
+  if (!s || !s.user) { hide('loading'); return show('denied'); }
+  await load();
+})().catch(() => { hide('loading'); show('denied'); });
+</script>
+</body>
+</html>
