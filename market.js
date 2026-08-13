@@ -143,6 +143,31 @@
     }).catch(function () {});
   }
 
+  // تسجيل الإحادة في قاعدة البيانات (كان الكود يُحفظ محلياً فقط)
+  function claimRef() {
+    var code = null;
+    try { code = localStorage.getItem(REF_STORE); } catch (e) {}
+    if (!code) return;
+    var s = sess();
+    if (!s || !s.access_token) return;
+
+    freshSession().then(function (fs) {
+      if (!fs || !fs.access_token) return;
+      return fetch(SB + '/rest/v1/rpc/claim_referral', {
+        method: 'POST',
+        headers: { apikey: KEY, Authorization: 'Bearer ' + fs.access_token,
+                   'Content-Type': 'application/json' },
+        body: JSON.stringify({ p_code: code })
+      }).then(function (r) { return r.ok ? r.json() : null; });
+    }).then(function (d) {
+      // ننظّف الكود في كل الحالات النهائية حتى لا نكرّر المحاولة بلا فائدة
+      if (d && (d.ok || ['already_attributed', 'self_referral',
+                         'invalid_code', 'account_too_old'].indexOf(d.error) >= 0)) {
+        try { localStorage.removeItem(REF_STORE); } catch (e) {}
+      }
+    }).catch(function () {});
+  }
+
   // ---------- 2) الشراء ----------
   function buy(productId, currency) {
     if (!sess()) {
@@ -261,8 +286,8 @@
     authFetch(SB + '/rest/v1/sellers?select=slug,status&user_id=eq.' +
       encodeURIComponent(s0.user.id))
       .then(function (rows) {
-        if (!rows || !rows[0] || !rows[0].slug) return;
         if (document.getElementById('mkSellerBtn')) return;
+        var isSeller = rows && rows[0] && rows[0].slug;
 
         // أعلى القائمة. كان يوضع قبل «عن التطبيق» وهو آخر عنصر،
         // فيقع في أسفل الشاشة ولا يراه المستخدم.
@@ -278,11 +303,15 @@
         el.id = 'mkSellerBtn';
         el.className = 'set-item';
         el.style.cursor = 'pointer';
-        el.onclick = function () { location.href = '/seller-dashboard.html'; };
+        el.onclick = function () {
+          location.href = isSeller ? '/seller-dashboard.html' : '/seller-apply.html';
+        };
         el.innerHTML =
           '<div class="set-l"><div class="set-icon">🏪</div><div>' +
-          '<div class="set-name">لوحة متجري</div>' +
-          '<div class="set-sub">أرباحي · منتجاتي · /s/' + esc(rows[0].slug) + '</div>' +
+          '<div class="set-name">' + (isSeller ? 'لوحة متجري' : 'افتح متجرك وابدأ البيع') + '</div>' +
+          '<div class="set-sub">' + (isSeller
+            ? 'أرباحي · منتجاتي · /s/' + esc(rows[0].slug)
+            : 'بِع منتجاتك الرقمية واحتفظ بـ70%') + '</div>' +
           '</div></div>' +
           '<div class="chev"><svg viewBox="0 0 24 24" stroke-width="2">' +
           '<path d="M9 18l6-6-6-6"/></svg></div>';
@@ -294,6 +323,7 @@
   // ---------- التشغيل ----------
   function start() {
     try { captureRef(); } catch (e) {}
+    try { claimRef(); } catch (e) {}
     try {
       var pid = q('p');
       if (pid) { openProduct(pid); clean(); }
@@ -317,6 +347,7 @@
       var tok = s1 && s1.access_token;
       if (tok && tok !== lastToken) {      // ظهرت جلسة جديدة
         lastToken = tok;
+        try { claimRef(); } catch (e) {}
         try { addSellerLink(); } catch (e) {}
       } else if (tok && !lastToken) {
         lastToken = tok;
