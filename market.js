@@ -103,6 +103,37 @@
     }).catch(function () { return null; });
   }
 
+  // ---------- قياس القِمع: أين يتوقّف الناس ----------
+  function sessKey() {
+    var k = null;
+    try { k = localStorage.getItem('tj_sk'); } catch (e) {}
+    if (!k) {
+      k = Math.random().toString(36).slice(2) + Date.now().toString(36);
+      try { localStorage.setItem('tj_sk', k); } catch (e) {}
+    }
+    return k;
+  }
+
+  function track(step, extra) {
+    var body = { p_step: step, p_session: sessKey() };
+    var e = extra || {};
+    if (e.product)  body.p_product  = e.product;
+    if (e.order)    body.p_order    = e.order;
+    if (e.currency) body.p_currency = e.currency;
+    if (e.amount)   body.p_amount   = e.amount;
+    if (e.detail)   body.p_detail   = e.detail;
+
+    var s = sess();
+    var h = { apikey: KEY, 'Content-Type': 'application/json' };
+    h['Authorization'] = 'Bearer ' + ((s && s.access_token) ? s.access_token : KEY);
+    try {
+      fetch(SB + '/rest/v1/rpc/track_funnel',
+        { method: 'POST', headers: h, body: JSON.stringify(body), keepalive: true })
+        .catch(function () {});
+    } catch (e2) {}
+  }
+  window.mkTrack = track;
+
   // ---------- نافذة بسيطة ----------
   function modal(html) {
     var old = document.getElementById('mkModal');
@@ -170,7 +201,9 @@
 
   // ---------- 2) الشراء ----------
   function buy(productId, currency) {
+    track('click_buy', { product: productId, currency: currency });
     if (!sess()) {
+      track('failed', { product: productId, detail: 'login_required' });
       toast('سجّل الدخول أولاً لإتمام الشراء');
       if (typeof window.openAuth === 'function') window.openAuth();
       return;
@@ -180,6 +213,8 @@
       .then(function (d) {
         if (d && d.ok && d.checkout_url) {
           try { sessionStorage.setItem('tj_mk_order', d.order_id); } catch (e) {}
+          track('gateway_opened', { product: productId, order: d.order_id,
+                                    currency: currency, amount: d.amount });
           location.href = d.checkout_url;
           return;
         }
@@ -195,9 +230,15 @@
           gateway_error: 'تعذّر الاتصال ببوابة الدفع. حاول بعد قليل.'
         };
         closeModal();
+        track('failed', { product: productId, currency: currency,
+                          detail: (d && d.error) || 'unknown' });
         toast(msgs[d && d.error] || 'تعذّر بدء الدفع.');
       })
-      .catch(function () { closeModal(); toast('تعذّر الاتصال. تحقّق من الإنترنت.'); });
+      .catch(function () {
+        closeModal();
+        track('failed', { product: productId, detail: 'network' });
+        toast('تعذّر الاتصال. تحقّق من الإنترنت.');
+      });
   }
   window.mkBuy = buy;
 
@@ -210,6 +251,7 @@
       .then(function (rows) {
         var p = rows && rows[0];
         if (!p) { toast('المنتج غير متاح.'); return; }
+        track('view_product', { product: p.id, amount: p.price_dzd });
         var usd = p.price_usd ? Number(p.price_usd).toFixed(2) : null;
         modal(
           '<div style="font-size:38px">' + esc(p.icon || '📘') + '</div>' +
@@ -242,6 +284,7 @@
       call('verify', { order_id: oid }).then(function (d) {
         if (d && d.ok && d.status === 'paid') {
           try { sessionStorage.removeItem('tj_mk_order'); } catch (e) {}
+          track('paid', { order: oid });
           modal(
             '<div style="font-size:40px">✅</div>' +
             '<h3 style="margin:8px 0">تم الدفع بنجاح</h3>' +
@@ -252,6 +295,7 @@
           return;
         }
         if (tries < 5) { setTimeout(poll, 2500); return; }
+        track('abandoned', { order: oid, detail: 'not_confirmed' });
         modal(
           '<div style="font-size:38px">⏳</div>' +
           '<h3 style="margin:8px 0;font-size:1rem">لم يُؤكَّد الدفع بعد</h3>' +
@@ -266,7 +310,10 @@
   function download(token) {
     toast('جارٍ تجهيز الرابط…');
     call('download', { token: token }).then(function (d) {
-      if (d && d.ok && d.url) { window.open(d.url, '_blank'); closeModal(); return; }
+      if (d && d.ok && d.url) {
+        track('download', {});
+        window.open(d.url, '_blank'); closeModal(); return;
+      }
       var m = { link_expired: 'انتهت صلاحية الرابط.', limit_reached: 'بلغت الحد الأقصى للتحميلات.',
                 not_paid: 'لم يُسجَّل الدفع بعد.' };
       toast(m[d && d.error] || 'تعذّر التحميل.');
@@ -365,13 +412,17 @@
 
   function start() {
     try { healSession(); } catch (e) {}
+    try { if (q('from') === 'store') track('view_store', { detail: q('s') || '' }); } catch (e) {}
     try { captureRef(); } catch (e) {}
     try { claimRef(); } catch (e) {}
     try {
       var pid = q('p');
       if (pid) { openProduct(pid); clean(); }
       else if (q('buy') === 'ok') { afterPay(); clean(); }
-      else if (q('buy') === 'fail') { toast('أُلغيت عملية الدفع.'); clean(); }
+      else if (q('buy') === 'fail') {
+      track('failed', { detail: 'cancelled_at_gateway' });
+      toast('أُلغيت عملية الدفع.'); clean();
+    }
     } catch (e) {}
     // محاولات أولى سريعة
     [800, 2000, 4000].forEach(function (ms) {
