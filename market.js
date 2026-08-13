@@ -320,6 +320,28 @@
       .catch(function () {});
   }
 
+  // ---------- 6) رابط إدارة السوق (للمالك فقط) ----------
+  // adminRow لا يظهره التطبيق إلا لمن profile.is_admin، فنستعمله كدليل.
+  function addAdminLink() {
+    if (document.getElementById('mkAdminBtn')) return;
+    var row = document.getElementById('adminRow');
+    if (!row || row.style.display === 'none' || !row.parentNode) return;
+
+    var el = document.createElement('div');
+    el.id = 'mkAdminBtn';
+    el.className = 'set-item';
+    el.style.cursor = 'pointer';
+    el.onclick = function () { location.href = '/market-admin.html'; };
+    el.innerHTML =
+      '<div class="set-l"><div class="set-icon">🛠️</div><div>' +
+      '<div class="set-name">إدارة السوق</div>' +
+      '<div class="set-sub">اعتماد البائعين · المنتجات · التحويلات</div>' +
+      '</div></div>' +
+      '<div class="chev"><svg viewBox="0 0 24 24" stroke-width="2">' +
+      '<path d="M9 18l6-6-6-6"/></svg></div>';
+    row.parentNode.insertBefore(el, row.nextSibling);
+  }
+
   // ---------- التشغيل ----------
   function start() {
     try { captureRef(); } catch (e) {}
@@ -332,7 +354,10 @@
     } catch (e) {}
     // محاولات أولى سريعة
     [800, 2000, 4000].forEach(function (ms) {
-      setTimeout(function () { try { addSellerLink(); } catch (e) {} }, ms);
+      setTimeout(function () {
+        try { addSellerLink(); } catch (e) {}
+        try { addAdminLink(); } catch (e) {}
+      }, ms);
     });
 
     // مراقبة تسجيل الدخول: المستخدم قد يفتح الصفحة وهو غير مسجّل ثم
@@ -341,6 +366,7 @@
     try { var s0 = sess(); lastToken = s0 && s0.access_token; } catch (e) {}
 
     var watcher = setInterval(function () {
+      try { addAdminLink(); } catch (e) {}
       if (document.getElementById('mkSellerBtn')) { clearInterval(watcher); return; }
       var s1 = null;
       try { s1 = sess(); } catch (e) {}
@@ -360,7 +386,10 @@
 
     // وعند العودة للتبويب بعد غياب
     document.addEventListener('visibilitychange', function () {
-      if (!document.hidden) { try { addSellerLink(); } catch (e) {} }
+      if (!document.hidden) {
+        try { addSellerLink(); } catch (e) {}
+        try { addAdminLink(); } catch (e) {}
+      }
     });
   }
 
