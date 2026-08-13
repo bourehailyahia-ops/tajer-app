@@ -300,8 +300,36 @@
       else if (q('buy') === 'ok') { afterPay(); clean(); }
       else if (q('buy') === 'fail') { toast('أُلغيت عملية الدفع.'); clean(); }
     } catch (e) {}
+    // محاولات أولى سريعة
     [800, 2000, 4000].forEach(function (ms) {
       setTimeout(function () { try { addSellerLink(); } catch (e) {} }, ms);
+    });
+
+    // مراقبة تسجيل الدخول: المستخدم قد يفتح الصفحة وهو غير مسجّل ثم
+    // يسجّل الدخول لاحقاً — وبلا هذه المراقبة لا يُعاد الفحص أبداً.
+    var lastToken = null;
+    try { var s0 = sess(); lastToken = s0 && s0.access_token; } catch (e) {}
+
+    var watcher = setInterval(function () {
+      if (document.getElementById('mkSellerBtn')) { clearInterval(watcher); return; }
+      var s1 = null;
+      try { s1 = sess(); } catch (e) {}
+      var tok = s1 && s1.access_token;
+      if (tok && tok !== lastToken) {      // ظهرت جلسة جديدة
+        lastToken = tok;
+        try { addSellerLink(); } catch (e) {}
+      } else if (tok && !lastToken) {
+        lastToken = tok;
+        try { addSellerLink(); } catch (e) {}
+      }
+    }, 2500);
+
+    // تتوقّف المراقبة بعد 10 دقائق حتى لا تعمل بلا نهاية
+    setTimeout(function () { clearInterval(watcher); }, 600000);
+
+    // وعند العودة للتبويب بعد غياب
+    document.addEventListener('visibilitychange', function () {
+      if (!document.hidden) { try { addSellerLink(); } catch (e) {} }
     });
   }
 
