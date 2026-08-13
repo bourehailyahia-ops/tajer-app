@@ -129,6 +129,16 @@ export default async function handler(req, res) {
 <meta property="og:url" content="${SITE}/s/${esc(s.slug)}">
 <meta name="twitter:card" content="summary_large_image">
 <link rel="icon" href="${SITE}/icon-192.png">
+<script>
+// قياس: زيارة صفحة متجر (مجهولة الهوية، بلا كوكيز)
+(function(){try{
+  var k=localStorage.getItem('tj_sk');
+  if(!k){k=Math.random().toString(36).slice(2)+Date.now().toString(36);localStorage.setItem('tj_sk',k);}
+  fetch('${SB_URL}/rest/v1/rpc/track_funnel',{method:'POST',keepalive:true,
+    headers:{apikey:'${SB_KEY}',Authorization:'Bearer ${SB_KEY}','Content-Type':'application/json'},
+    body:JSON.stringify({p_step:'view_store',p_session:k,p_detail:'${esc(s.slug)}'})}).catch(function(){});
+}catch(e){}})();
+</script>
 <script type="application/ld+json">${JSON.stringify(ld).replace(/</g, '\\u003c').replace(/>/g, '\\u003e').replace(/&/g, '\\u0026')}</script>
 <style>
 :root{--bg:#0d0f14;--panel:#151922;--line:#242a36;--text:#e8eaed;--muted:#9aa0a6;--gold:#C9A84C}
@@ -272,4 +282,4 @@ padding:14px;border-radius:12px;text-decoration:none;font-size:.95rem}
   // كاش على الحافة مع إعادة تحقّق — الصفحة سريعة والتحديث يظهر خلال دقيقة
   res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=600');
   res.status(200).send(html);
-    }
+                    }
