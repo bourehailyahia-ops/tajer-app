@@ -321,153 +321,54 @@
   }
   window.mkDownload = download;
 
-  // ---------- 5) زر «متجري» ----------
-  // يوضع كعنصر في قائمة الإعدادات (صفحة الحساب) ليطابق تصميم التطبيق.
-  // سبب سابق للعطل: كان يوضع داخل proBanner وهي display:none لغير المشتركين.
-  function addSellerLink() {
-    if (document.getElementById('mkSellerBtn')) return;
+  // ---------- التشغيل ----------
+  // إصلاح التوقّف: التطبيق لا يجدّد رمز الجلسة، فبعد ساعة يفشل
+  // /auth/v1/user بـ403 و/profiles بـ401 ويعلق. نجدّد الرمز مبكراً،
+  // وإن كان منتهياً نعيد تحميل الصفحة مرة واحدة ليبدأ التطبيق برمز صالح.
+  function healSession() {
+    var s = sess();
+    if (!s || !s.access_token || !s.refresh_token) return;
+    if (!expired(s.access_token)) return;
 
-    var s0 = sess();
-    if (!s0 || !s0.user || !s0.user.id) return;
+    var GUARD = 'tj_healed';
+    var already = false;
+    try { already = sessionStorage.getItem(GUARD) === '1'; } catch (e) {}
+    if (already) return;                      // لا نعيد التحميل أكثر من مرة
 
-    authFetch(SB + '/rest/v1/sellers?select=slug,status&user_id=eq.' +
-      encodeURIComponent(s0.user.id))
-      .then(function (rows) {
-        if (document.getElementById('mkSellerBtn')) return;
-        var isSeller = rows && rows[0] && rows[0].slug;
-
-        // أعلى القائمة. كان يوضع قبل «عن التطبيق» وهو آخر عنصر،
-        // فيقع في أسفل الشاشة ولا يراه المستخدم.
-        var item = document.getElementById('authRow')
-                || document.getElementById('adminRow');
-        if (!item) {
-          var anchor = document.getElementById('stAbout');
-          item = anchor ? anchor.closest('.set-item') : null;
-        }
-        if (!item || !item.parentNode) return;
-
-        var el = document.createElement('div');
-        el.id = 'mkSellerBtn';
-        el.className = 'set-item';
-        el.style.cursor = 'pointer';
-        el.onclick = function () {
-          location.href = isSeller ? '/seller-dashboard.html' : '/seller-apply.html';
-        };
-        el.innerHTML =
-          '<div class="set-l"><div class="set-icon">🏪</div><div>' +
-          '<div class="set-name">' + (isSeller ? 'لوحة متجري' : 'افتح متجرك وابدأ البيع') + '</div>' +
-          '<div class="set-sub">' + (isSeller
-            ? 'أرباحي · منتجاتي · /s/' + esc(rows[0].slug)
-            : 'بِع منتجاتك الرقمية واحتفظ بـ70%') + '</div>' +
-          '</div></div>' +
-          '<div class="chev"><svg viewBox="0 0 24 24" stroke-width="2">' +
-          '<path d="M9 18l6-6-6-6"/></svg></div>';
-        item.parentNode.insertBefore(el, item);
-      })
-      .catch(function () {});
+    forceRefresh().then(function (ns) {
+      if (!ns) return;
+      try { sessionStorage.setItem(GUARD, '1'); } catch (e) {}
+      location.reload();
+    }).catch(function () {});
   }
 
-  // ---------- 6) رابط إدارة السوق (للمالك فقط) ----------
-  // adminRow لا يظهره التطبيق إلا لمن profile.is_admin، فنستعمله كدليل.
-  function addAdminLink() {
-    if (document.getElementById('mkAdminBtn')) return;
-    var row = document.getElementById('adminRow');
-    if (!row || row.style.display === 'none' || !row.parentNode) return;
+  function start() {
+    try { healSession(); } catch (e) {}
+    try { installBgFix(); } catch (e) {}
+    try { if (q('from') === 'store') track('view_store', { detail: q('s') || '' }); } catch (e) {}
+    try { captureRef(); } catch (e) {}
+    try { claimRef(); } catch (e) {}
+    try {
+      var pid = q('p');
+      if (pid) { openProduct(pid); clean(); }
+      else if (q('buy') === 'ok') { afterPay(); clean(); }
+      else if (q('buy') === 'fail') {
+      track('failed', { detail: 'cancelled_at_gateway' });
+      toast('أُلغيت عملية الدفع.'); clean();
+    }
+    } catch (e) {}
+    // محاولات أولى سريعة
+    [800, 2000, 4000].forEach(function (ms) {
+      setTimeout(function () {
+        try { installBgFix(); } catch (e) {}
+      }, ms);
+    });
 
-    var el = document.createElement('div');
-    el.id = 'mkAdminBtn';
-    el.className = 'set-item';
-    el.style.cursor = 'pointer';
-    el.onclick = function () { location.href = '/market-admin.html'; };
-    el.innerHTML =
-      '<div class="set-l"><div class="set-icon">🛠️</div><div>' +
-      '<div class="set-name">إدارة السوق</div>' +
-      '<div class="set-sub">اعتماد البائعين · المنتجات · التحويلات</div>' +
-      '</div></div>' +
-      '<div class="chev"><svg viewBox="0 0 24 24" stroke-width="2">' +
-      '<path d="M9 18l6-6-6-6"/></svg></div>';
-    row.parentNode.insertBefore(el, row.nextSibling);
   }
 
-
-  // ═══════════════════════════════════════════════
-  // إصلاح خدمة إزالة الخلفية
-  // المشكلة: المكتبة تنزّل نموذجاً بحجم 44 ميغابايت من staticimgly.com،
-  // والنسخة الأصلية لا تُظهر تقدّم التنزيل ولا سببه الحقيقي عند الفشل.
-  // نستبدل الدالّة من هنا بلا لمس app.js.
-  // ═══════════════════════════════════════════════
-  function installBgFix() {
-    if (typeof window.runBgRemove !== 'function') return;
-    if (window.__bgFixed) return;
-    window.__bgFixed = true;
-
-    var el = function (id) { return document.getElementById(id); };
-    var setTxt = function (t) { var n = el('bgLoadText'); if (n) n.textContent = t; };
-
-    window.runBgRemove = async function () {
-      var input = el('bgInput');
-      var file = input && input.files && input.files[0];
-      if (!file) { toast('اختر صورة أولاً'); return; }
-
-      var loadEl = el('bg-load'), errEl = el('bg-err'),
-          resEl = el('bg-res'), btnEl = el('bg-btn');
-      if (loadEl) loadEl.style.display = 'block';
-      if (errEl)  errEl.style.display  = 'none';
-      if (resEl)  resEl.style.display  = 'none';
-      if (btnEl)  btnEl.style.display  = 'none';
-
-      var fail = function (msg) {
-        if (loadEl) loadEl.style.display = 'none';
-        if (btnEl)  btnEl.style.display  = 'block';
-        if (errEl) { errEl.style.display = 'block'; errEl.textContent = '✕ ' + msg; }
-      };
-
-      try {
-        if (typeof window.consumeUse === 'function') await window.consumeUse();
-
-        setTxt('جارٍ تجهيز الصورة…');
-        var img = file;
-        if (typeof window.resizeImageFile === 'function') {
-          img = await window.resizeImageFile(file, 1024);
-        }
-
-        setTxt('جارٍ تحميل المكتبة…');
-        var sources = [
-          'https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.5.5/dist/browser.mjs',
-          'https://esm.sh/@imgly/background-removal@1.5.5',
-          'https://unpkg.com/@imgly/background-removal@1.5.5/dist/browser.mjs'
-        ];
-        var removeBackground = null, libErr = null;
-        for (var i = 0; i < sources.length; i++) {
-          try {
-            var mod = await import(sources[i]);
-            removeBackground = mod.removeBackground ||
-                               (mod.default && mod.default.removeBackground) || mod.default;
-            if (typeof removeBackground === 'function') break;
-            removeBackground = null;
-          } catch (e) { libErr = e; }
-        }
-        if (!removeBackground) {
-          fail('تعذّر تحميل المكتبة. ' + String(libErr && libErr.message || '').slice(0, 80));
-          return;
-        }
-
-        // النموذج الأصغر (‎~44 ميغابايت بدل 88). يُحمَّل مرة واحدة ويُحفَظ.
-        var cfg = {
-          model: 'isnet_quint8',
-          output: { format: 'image/png', quality: 0.9 },
-          progress: function (key, current, total) {
-            var pct = total ? Math.round((current / total) * 100) : 0;
-            var mb = total ? (total / 1048576).toFixed(0) : '?';
-            if (String(key).indexOf('fetch') === 0 || String(key).indexOf('model') >= 0
-                || String(key).indexOf('compute') < 0) {
-              setTxt('تنزيل ملفات الذكاء الاصطناعي… ' + pct + '%  (' + mb +
-                     ' م.ب — مرة واحدة فقط)');
-            } else {
-              setTxt('جارٍ المعالجة… ' + pct + '%');
-            }
-          }
-        };
-
-        setTxt('تنزيل ملفات الذكاء الاصطناعي… (أول مرة فقط، قد تأخذ دقائق)');
-        var blob =
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', start);
+  } else {
+    start();
+  }
+})();
