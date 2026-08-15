@@ -72,7 +72,7 @@
         try {
           blob = await removeBackground(img, {
             publicPath: BG_DATA[j],
-            model: 'isnet_fp16',
+            model: 'medium',
             progress: function (key, cur, total) {
               if (!txtEl || !total) return;
               if (String(key).indexOf('fetch') === 0) {
