@@ -23,8 +23,9 @@
     'https://esm.sh/@imgly/background-removal@1.4.5'
   ];
   var BG_DATA = [
-    'https://cdn.jsdelivr.net/npm/@imgly/background-removal-data@1.4.5/dist/',
-    'https://unpkg.com/@imgly/background-removal-data@1.4.5/dist/'
+    // المصدر الرسمي: الوحيد القادر على خدمة حزمة النموذج (136 م.ب).
+    // jsdelivr و unpkg يرفضان الحزم بهذا الحجم.
+    'https://staticimgly.com/@imgly/background-removal-data/1.4.5/dist/'
   ];
 
   function el(id) { return document.getElementById(id); }
