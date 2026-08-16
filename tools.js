@@ -45,16 +45,16 @@
     qr.innerHTML = HDR('qr', '🔳', 'مولّد QR', 'رمز لمتجرك أو منتجك أو رقمك') +
       '<div class="svc-body">' + NOTE +
       '<div class="f-label">النوع</div>' +
-      '<select id="qrType" onchange="tjQrType()">' +
+      '<select class="f-input" id="qrType" onchange="tjQrType()">' +
         '<option value="url">رابط موقع أو متجر</option>' +
         '<option value="wa">واتساب</option>' +
         '<option value="tel">رقم هاتف</option>' +
         '<option value="text">نص حر</option>' +
       '</select>' +
       '<div class="f-label" id="qrLbl">الرابط</div>' +
-      '<input id="qrVal" placeholder="https://tajer-app.vercel.app" dir="ltr">' +
+      '<input class="f-input" id="qrVal" placeholder="https://tajer-app.vercel.app" dir="ltr">' +
       '<div class="f-label">حجم الرمز</div>' +
-      '<select id="qrSize">' +
+      '<select class="f-input" id="qrSize">' +
         '<option value="512">متوسط (512)</option>' +
         '<option value="1024">كبير — للطباعة (1024)</option>' +
         '<option value="256">صغير (256)</option>' +
@@ -74,14 +74,14 @@
     inv.id = 'sv-inv';
     inv.innerHTML = HDR('inv', '🧾', 'فاتورة احترافية', 'فاتورة جاهزة للطباعة أو الحفظ PDF') +
       '<div class="svc-body">' + NOTE +
-      '<div class="f-label">اسم متجرك</div><input id="ivShop" placeholder="متجر تاجر">' +
-      '<div class="f-label">هاتفك</div><input id="ivPhone" placeholder="0555 12 34 56" dir="ltr">' +
-      '<div class="f-label">اسم الزبون</div><input id="ivClient" placeholder="محمد أمين">' +
-      '<div class="f-label">هاتف الزبون / العنوان</div><input id="ivCAddr" placeholder="سطيف">' +
+      '<div class="f-label">اسم متجرك</div><input class="f-input" id="ivShop" placeholder="متجر تاجر">' +
+      '<div class="f-label">هاتفك</div><input class="f-input" id="ivPhone" placeholder="0555 12 34 56" dir="ltr">' +
+      '<div class="f-label">اسم الزبون</div><input class="f-input" id="ivClient" placeholder="محمد أمين">' +
+      '<div class="f-label">هاتف الزبون / العنوان</div><input class="f-input" id="ivCAddr" placeholder="سطيف">' +
       '<div class="f-label">المنتجات</div>' +
       '<div id="ivRows"></div>' +
-      '<button class="btn-copy" onclick="tjInvRow()" style="width:100%;margin-top:6px;">➕ إضافة سطر</button>' +
-      '<div class="f-label">سعر التوصيل (دج)</div><input id="ivShip" type="number" min="0" value="0">' +
+      '<button class="btn-copy" onclick="tjInvRow()" style="width:100%;margin-top:2px;">➕ إضافة منتج آخر</button>' +
+      '<div class="f-label">سعر التوصيل (دج)</div><input class="f-input" id="ivShip" type="number" min="0" value="0">' +
       '<button class="btn-gold" onclick="tjInvMake()">🧾 إنشاء الفاتورة</button>' +
       '<div id="ivErr" style="display:none;color:#E74C3C;font-size:.82rem;margin-top:10px;"></div>' +
       '</div>';
@@ -219,13 +219,25 @@
     if (!box) return;
     rowN++;
     var d = document.createElement('div');
-    d.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;align-items:center;';
+    d.className = 'tj-row';
+    d.style.cssText = 'border:1px solid var(--line);border-radius:var(--r);' +
+      'padding:10px;margin-bottom:8px;background:var(--panel);';
     d.innerHTML =
-      '<input class="iv-n" placeholder="المنتج" style="flex:2;">' +
-      '<input class="iv-q" type="number" min="1" value="1" placeholder="كم" style="flex:.7;">' +
-      '<input class="iv-p" type="number" min="0" placeholder="السعر" style="flex:1;">' +
-      '<button onclick="this.parentNode.remove()" style="background:transparent;border:1px solid var(--line);' +
-      'color:#E74C3C;border-radius:8px;padding:8px 10px;cursor:pointer;font-family:inherit;">✕</button>';
+      '<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;">' +
+        '<input class="f-input iv-n" placeholder="اسم المنتج" style="flex:1;">' +
+        '<button class="tj-del" type="button" ' +
+          'style="background:transparent;border:1px solid var(--line);color:#E74C3C;' +
+          'border-radius:10px;padding:11px 13px;cursor:pointer;font-family:inherit;' +
+          'font-size:.9rem;flex-shrink:0;">✕</button>' +
+      '</div>' +
+      '<div style="display:flex;gap:8px;">' +
+        '<div style="flex:1;"><div class="f-label">الكمية</div>' +
+          '<input class="f-input iv-q" type="number" min="1" value="1"></div>' +
+        '<div style="flex:1.4;"><div class="f-label">سعر الوحدة (دج)</div>' +
+          '<input class="f-input iv-p" type="number" min="0" placeholder="0"></div>' +
+      '</div>';
+    var del = d.querySelector('.tj-del');
+    if (del) del.addEventListener('click', function () { d.remove(); });
     box.appendChild(d);
   };
 
