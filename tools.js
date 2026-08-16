@@ -6,9 +6,12 @@
 (function () {
   'use strict';
 
+  // المسار السابق (qrcode/build/) غير موجود في الحزمة أصلاً.
+  // هذه المكتبة فيها ملف متصفّح حقيقي، واختُبرت بتوليد رمز والتحقق
+  // من أنماط الكاشف الثلاثة.
   var QR_LIBS = [
-    'https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js',
-    'https://unpkg.com/qrcode@1.5.4/build/qrcode.min.js'
+    'https://cdn.jsdelivr.net/npm/qrcode-generator@2.0.4/dist/qrcode.js',
+    'https://unpkg.com/qrcode-generator@2.0.4/dist/qrcode.js'
   ];
 
   function el(id) { return document.getElementById(id); }
@@ -89,17 +92,37 @@
     if (el('tjCardQr')) return;
     var grid = document.querySelector('.svc-grid');
     if (!grid) return;
+
+    // نستنسخ بطاقة مجانية موجودة ليطابق الشكل تماماً مهما تغيّر التصميم
+    var model = null;
+    var all = grid.querySelectorAll('.svc-card');
+    for (var i = 0; i < all.length; i++) {
+      var c = all[i];
+      if (!c.querySelector('.pro-tag') && !c.querySelector('.pro-lock-tag')
+          && c.style.display !== 'none') { model = c; break; }
+    }
+    if (!model) return;
+
     var mk = function (id, fn, icon, name, sub) {
-      var b = document.createElement('button');
-      b.className = 'svc-card';
+      var b = model.cloneNode(true);
       b.id = id;
       b.setAttribute('onclick', fn);
-      b.innerHTML = '<div class="svc-icon">' + icon + '</div>' +
-        '<div class="svc-name">' + name + '</div>' +
-        '<div class="svc-sub">' + sub + '</div>' +
-        '<span class="free-tag">✓ متاح</span>';
+      b.classList.remove('locked');
+      // ننظّف المعرّفات المنسوخة حتى لا تتكرّر ولا يعبث بها مترجم الواجهة
+      var ids = b.querySelectorAll('[id]');
+      for (var j = 0; j < ids.length; j++) ids[j].removeAttribute('id');
+      var i18 = b.querySelectorAll('[data-i18n]');
+      for (var k = 0; k < i18.length; k++) i18[k].removeAttribute('data-i18n');
+
+      var ic = b.querySelector('.svc-icon');
+      var nm = b.querySelector('.svc-name');
+      var sb = b.querySelector('.svc-sub');
+      if (ic) ic.textContent = icon;
+      if (nm) nm.textContent = name;
+      if (sb) sb.textContent = sub;
       return b;
     };
+
     grid.appendChild(mk('tjCardQr', "goFree('qr')", '🔳', 'مولّد QR', 'رمز لمتجرك ومنتجاتك'));
     grid.appendChild(mk('tjCardInv', "goFree('inv')", '🧾', 'فاتورة احترافية', 'جاهزة للطباعة و PDF'));
   }
@@ -119,7 +142,7 @@
   };
 
   function loadQrLib() {
-    if (window.QRCode && window.QRCode.toCanvas) return Promise.resolve(true);
+    if (typeof window.qrcode === 'function') return Promise.resolve(true);
     var tryOne = function (i) {
       if (i >= QR_LIBS.length) return Promise.reject(new Error('lib'));
       return new Promise(function (res, rej) {
@@ -148,21 +171,42 @@
 
     loadQrLib().then(function () {
       var size = parseInt(el('qrSize').value, 10) || 512;
-      window.QRCode.toCanvas(el('qrCanvas'), data, {
-        width: size, margin: 2,
-        color: { dark: '#12151c', light: '#ffffff' }
-      }, function (err) {
-        if (err) return fail('تعذّر إنشاء الرمز. جرّب نصاً أقصر.');
-        var c = el('qrCanvas');
-        c.style.width = '100%';
-        c.style.maxWidth = '260px';
-        c.style.height = 'auto';
-        el('qrDl').href = c.toDataURL('image/png');
-        outEl.style.display = 'block';
-        if (typeof window.saveHist === 'function') {
-          window.saveHist('🔳 مولّد QR', 'أُنشئ رمز QR بنجاح');
+      var q;
+      try {
+        q = window.qrcode(0, 'M');       // 0 = يختار الحجم تلقائياً
+        q.addData(data);
+        q.make();
+      } catch (e2) {
+        return fail('النص طويل جداً للرمز. اختصره وحاول مجدداً.');
+      }
+
+      var n = q.getModuleCount();
+      var quiet = 4;                     // الهامش الأبيض الإلزامي
+      var cell = Math.max(1, Math.floor(size / (n + quiet * 2)));
+      var full = cell * (n + quiet * 2);
+
+      var cv = el('qrCanvas');
+      cv.width = full; cv.height = full;
+      var ctx = cv.getContext('2d');
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, full, full);
+      ctx.fillStyle = '#12151c';
+      for (var r = 0; r < n; r++) {
+        for (var c = 0; c < n; c++) {
+          if (q.isDark(r, c)) {
+            ctx.fillRect((c + quiet) * cell, (r + quiet) * cell, cell, cell);
+          }
         }
-      });
+      }
+
+      cv.style.width = '100%';
+      cv.style.maxWidth = '260px';
+      cv.style.height = 'auto';
+      el('qrDl').href = cv.toDataURL('image/png');
+      outEl.style.display = 'block';
+      if (typeof window.saveHist === 'function') {
+        window.saveHist('🔳 مولّد QR', 'أُنشئ رمز QR بنجاح');
+      }
     }).catch(function () {
       fail('تعذّر تحميل المكتبة. تحقّق من الإنترنت وحاول مجدداً.');
     });
