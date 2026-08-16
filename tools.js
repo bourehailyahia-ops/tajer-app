@@ -86,6 +86,7 @@
       '<div id="ivErr" style="display:none;color:#E74C3C;font-size:.82rem;margin-top:10px;"></div>' +
       '</div>';
     host.appendChild(inv);
+
   }
 
   function buildCards() {
