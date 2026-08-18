@@ -8,36 +8,98 @@
   'use strict';
 
   // الروابط الرسمية — تُفتح في تبويب جديد بالرقم جاهزاً حيث أمكن
+  // ملاحظة مهمة: معظم شركات التوصيل الجزائرية الصغيرة تعمل على منصّة
+  // Ecotrack نفسها ولا تملك صفحات تتبّع مستقلّة، لذلك نوجّهها إليها.
+  // والشركات الدولية تُوجَّه إلى 17track الذي يغطّي أكثر من 2000 شركة
+  // بينها Cainiao (علي إكسبريس) وTemu وShein.
+  var ECO  = function (n) { return 'https://suivi.ecotrack.dz/fr?tracking=' + encodeURIComponent(n); };
+  var T17  = function (n) { return 'https://t.17track.net/ar#nums=' + encodeURIComponent(n); };
+
   var CARRIERS = [
-    { id: 'yal',  name: 'ياليدين — Yalidine', icon: '🟡',
+    // ── جزائرية ──
+    { id: 'yal',  name: 'ياليدين — Yalidine', icon: '🟡', g: 'dz',
       url: function (n) { return 'https://yalidine.com/suivre-un-colis/?tracking=' + encodeURIComponent(n); },
       test: function (n) { return /^yal[-\s]?/i.test(n); } },
 
-    { id: 'eco',  name: 'إيكوتراك — Ecotrack', icon: '🟢',
-      note: 'يشمل DHD · Conexlog · MSM Go وأكثر من 19 شركة',
-      url: function (n) { return 'https://suivi.ecotrack.dz/fr?tracking=' + encodeURIComponent(n); },
-      test: function () { return false; } },
-
-    { id: 'noe',  name: 'نويست — NOEST', icon: '🔵',
+    { id: 'noe',  name: 'نويست — NOEST', icon: '🔵', g: 'dz',
       url: function (n) { return 'https://app.noest-dz.com/list/t?tracking=' + encodeURIComponent(n); },
       test: function (n) { return /^noe/i.test(n); } },
 
-    { id: 'zr',   name: 'زد آر إكسبريس — ZR Express', icon: '🟣',
+    { id: 'zr',   name: 'زد آر إكسبريس — ZR Express', icon: '🟣', g: 'dz',
       url: function () { return 'https://zrexpress.com/'; },
       test: function (n) { return /^zr/i.test(n); } },
 
-    { id: 'may',  name: 'مايسترو — Maystro', icon: '🟠',
+    { id: 'may',  name: 'مايسترو — Maystro', icon: '🟠', g: 'dz',
       url: function () { return 'https://maystro-delivery.com/'; },
       test: function (n) { return /^may/i.test(n); } },
 
-    { id: 'post', name: 'بريد الجزائر — EMS', icon: '📮',
-      url: function (n) { return 'https://t.17track.net/ar#nums=' + encodeURIComponent(n); },
+    { id: 'eco',  name: 'إيكوتراك — Ecotrack', icon: '🟢', g: 'dz',
+      note: 'منصّة تجمع أكثر من 19 شركة توصيل جزائرية',
+      url: ECO, test: function () { return false; } },
+
+    { id: 'gue',  name: 'غيبكس — Guepex Express', icon: '🚚', g: 'dz',
+      note: 'يعمل على منصّة Ecotrack', url: ECO, test: function () { return false; } },
+
+    { id: 'dhd',  name: 'DHD Express', icon: '🚚', g: 'dz',
+      note: 'يعمل على منصّة Ecotrack', url: ECO, test: function () { return false; } },
+
+    { id: 'wex',  name: 'وورلد إكسبريس — World Express', icon: '🚚', g: 'dz',
+      note: 'يعمل على منصّة Ecotrack', url: ECO, test: function () { return false; } },
+
+    { id: 'cnx',  name: 'كونكسلوغ — Conexlog', icon: '🚚', g: 'dz',
+      note: 'يعمل على منصّة Ecotrack', url: ECO, test: function () { return false; } },
+
+    { id: 'msm',  name: 'MSM Go', icon: '🚚', g: 'dz',
+      note: 'يعمل على منصّة Ecotrack', url: ECO, test: function () { return false; } },
+
+    { id: 'and',  name: 'أندرسون — Anderson', icon: '🚚', g: 'dz',
+      note: 'إن لم يظهر الطرد جرّب Ecotrack', url: ECO, test: function () { return false; } },
+
+    { id: 'roc',  name: 'روكيت — Rocket Delivery', icon: '🚚', g: 'dz',
+      note: 'إن لم يظهر الطرد جرّب Ecotrack', url: ECO, test: function () { return false; } },
+
+    { id: 'ecd',  name: 'إي-كومدال — E-Comdel', icon: '🚚', g: 'dz',
+      note: 'إن لم يظهر الطرد جرّب Ecotrack', url: ECO, test: function () { return false; } },
+
+    { id: 'kaz',  name: 'كازي تور — Kazi Tour', icon: '🚚', g: 'dz',
+      note: 'إن لم يظهر الطرد جرّب Ecotrack', url: ECO, test: function () { return false; } },
+
+    { id: 'post', name: 'بريد الجزائر — EMS', icon: '📮', g: 'dz',
+      url: T17,
       test: function (n) { return /^[A-Z]{2}\d{9}DZ$/i.test(n.replace(/\s/g, '')); } },
 
-    { id: 'intl', name: 'علي إكسبريس ودولي', icon: '🌍',
-      note: 'Cainiao · DHL · FedEx · UPS · أكثر من 2000 شركة',
-      url: function (n) { return 'https://t.17track.net/ar#nums=' + encodeURIComponent(n); },
-      test: function (n) { return /^(LP|LZ|SY|RB|UM|CN|SG)\w{8,}/i.test(n.replace(/\s/g, '')); } }
+    // ── دولية ──
+    { id: 'ali',  name: 'علي إكسبريس — AliExpress', icon: '🛒', g: 'intl',
+      note: 'يشمل Cainiao وكل شركاء علي إكسبريس', url: T17,
+      test: function (n) { return /^(LP|LZ|LY|SY|AE)\w{8,}/i.test(n.replace(/\s/g, '')); } },
+
+    { id: 'temu', name: 'تيمو — Temu', icon: '🛍️', g: 'intl', url: T17,
+      test: function () { return false; } },
+
+    { id: 'shn',  name: 'شي إن — Shein', icon: '👗', g: 'intl', url: T17,
+      test: function () { return false; } },
+
+    { id: 'amz',  name: 'أمازون — Amazon', icon: '📦', g: 'intl', url: T17,
+      test: function (n) { return /^TBA\d{10,}/i.test(n.replace(/\s/g, '')); } },
+
+    { id: 'dhl',  name: 'دي إتش إل — DHL', icon: '✈️', g: 'intl', url: T17,
+      test: function (n) { return /^\d{10}$/.test(n.replace(/\s/g, '')); } },
+
+    { id: 'fdx',  name: 'فيديكس — FedEx', icon: '✈️', g: 'intl', url: T17,
+      test: function (n) { return /^\d{12}$/.test(n.replace(/\s/g, '')); } },
+
+    { id: 'ups',  name: 'يو بي إس — UPS', icon: '✈️', g: 'intl', url: T17,
+      test: function (n) { return /^1Z\w{16}$/i.test(n.replace(/\s/g, '')); } },
+
+    { id: 'arx',  name: 'أرامكس — Aramex', icon: '✈️', g: 'intl', url: T17,
+      test: function () { return false; } },
+
+    { id: 'chp',  name: 'بريد الصين — China Post', icon: '🇨🇳', g: 'intl', url: T17,
+      test: function (n) { return /^[A-Z]{2}\d{9}CN$/i.test(n.replace(/\s/g, '')); } },
+
+    { id: 'intl', name: 'شركة أخرى — بحث شامل', icon: '🌍', g: 'intl',
+      note: 'يبحث في أكثر من 2000 شركة توصيل حول العالم', url: T17,
+      test: function () { return false; } }
   ];
 
   var KEY = 'tj_parcels';
@@ -78,9 +140,15 @@
     var host = first && first.parentNode;
     if (!host) return;
 
-    var opts = CARRIERS.map(function (c) {
+    var opt = function (c) {
       return '<option value="' + c.id + '">' + c.icon + ' ' + c.name + '</option>';
-    }).join('');
+    };
+    var dzList = [], inList = [];
+    for (var q = 0; q < CARRIERS.length; q++) {
+      (CARRIERS[q].g === 'intl' ? inList : dzList).push(opt(CARRIERS[q]));
+    }
+    var opts = '<optgroup label="🇩🇿 شركات جزائرية">' + dzList.join('') + '</optgroup>' +
+               '<optgroup label="🌍 دولية وتسوّق عالمي">' + inList.join('') + '</optgroup>';
 
     var d = document.createElement('div');
     d.className = 'screen';
@@ -95,7 +163,7 @@
       '<input class="f-input" id="trNum" placeholder="yal-3F2A9B" dir="ltr" ' +
         'oninput="tjTrDetect()" autocomplete="off">' +
       '<div class="f-label">شركة التوصيل</div>' +
-      '<select class="f-input" id="trCo">' + opts + '</select>' +
+      '<select class="f-input" id="trCo" onchange="tjTrNote()">' + opts + '</select>' +
       '<div id="trHint" style="font-size:.72rem;color:var(--muted);margin-top:5px;"></div>' +
       '<div class="f-label">اسم للطرد (اختياري)</div>' +
       '<input class="f-input" id="trName" maxlength="40" placeholder="طلبية محمد — حقيبة">' +
@@ -152,6 +220,11 @@
       var cur = byId(el('trCo').value);
       hint.textContent = (cur && cur.note) ? cur.note : '';
     }
+  };
+
+  window.tjTrNote = function () {
+    var c = byId(el('trCo').value);
+    el('trHint').textContent = (c && c.note) ? c.note : '';
   };
 
   window.tjTrGo = function () {
