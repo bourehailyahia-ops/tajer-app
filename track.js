@@ -155,8 +155,17 @@
     d.id = 'sv-track';
     d.innerHTML = HDR('📦', 'تتبّع الطرود', 'كل شركات التوصيل في مكان واحد') +
       '<div class="svc-body">' +
+      '<div style="background:rgba(243,156,18,.1);border:1px solid rgba(243,156,18,.35);' +
+        'border-radius:var(--r);padding:13px;font-size:.8rem;line-height:1.8;">' +
+        '<b style="color:#F39C12;">⚠️ اقرأ قبل الاستعمال</b><br>' +
+        '<span style="color:var(--text);">عرض حالة الطرد <b>داخل تاجر</b> يتطلّب أن تملك ' +
+        '<b>حساب تاجر</b> لدى شركة التوصيل (ياليدين · ZR Express · مايسترو · نويست)، ' +
+        'لأن هذه الشركات لا تسمح بالاستعلام إلا لأصحاب الحسابات.</span><br>' +
+        '<span style="color:var(--muted);font-size:.76rem;">' +
+        'إن لم يكن لديك حساب، تبقى كل الشركات متاحة عبر زر «فتح موقع الشركة».</span>' +
+      '</div>' +
       '<div style="background:var(--gold-dim);border:1px solid var(--line);border-radius:var(--r);' +
-        'padding:12px;font-size:.8rem;color:var(--gold-l);line-height:1.6;">' +
+        'padding:12px;font-size:.8rem;color:var(--gold-l);line-height:1.6;margin-top:10px;">' +
         '📦 احفظ أرقام طرودك هنا، واضغط أيّها لفتح صفحة التتبّع الرسمية مباشرة.</div>' +
 
       '<div class="f-label">رقم التتبّع</div>' +
