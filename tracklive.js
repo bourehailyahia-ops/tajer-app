@@ -81,8 +81,18 @@
     api({ action: 'track', tracking_no: num, courier: co,
           label: (el('trName').value || '').trim() })
       .then(function (d) {
-        if (d && d.ok) { showStatus(box, d, num); return; }
+        if (d && d.ok) {
+          showStatus(box, d, num);
+          api({ action: 'stats' }).then(function (r) {
+            if (r && r.stats) {
+              var bar = statsBar(r.stats);
+              if (bar) box.innerHTML = bar + box.innerHTML;
+            }
+          }).catch(function () {});
+          return;
+        }
         if (d && d.error === 'not_linked') { askLink(box, co); return; }
+        if (d && d.error === 'subscription_required') { askSub(box); return; }
         var msgs = {
           rate_limited: 'طلبات كثيرة. انتظر دقيقة.',
           courier_error: 'الشركة رفضت الطلب: ' + (d.detail || 'تحقّق من الرقم والبيانات'),
@@ -98,6 +108,29 @@
         box.innerHTML = '<div style="color:#E74C3C;font-size:.83rem;">تعذّر الاتصال.</div>';
       });
   };
+
+  function statsBar(st) {
+    if (!st || st.error) return '';
+    var badge, col;
+    if (st.pro_until && new Date(st.pro_until) > new Date()) {
+      badge = '👑 برو — غير محدود'; col = 'var(--gold)';
+    } else if (st.unlimited) {
+      badge = '✓ اشتراك فعّال — غير محدود'; col = '#2ECC71';
+    } else {
+      badge = 'تجربة مجانية'; col = 'var(--muted)';
+    }
+    var until = st.track_until || st.pro_until;
+    return '<div style="display:flex;align-items:center;justify-content:space-between;' +
+      'gap:8px;background:var(--panel);border:1px solid var(--line);border-radius:10px;' +
+      'padding:9px 12px;margin-bottom:10px;font-size:.72rem;">' +
+      '<span style="color:' + col + ';font-weight:700;">' + badge + '</span>' +
+      '<span style="color:var(--muted);">استعملتها <b>' + (st.month || 0) +
+        '</b> مرة هذا الشهر</span>' +
+      '</div>' +
+      (until && st.unlimited ? '<div style="font-size:.66rem;color:var(--muted);' +
+        'margin:-6px 0 10px;">صالح حتى ' +
+        new Date(until).toLocaleDateString('ar-DZ') + '</div>' : '');
+  }
 
   function showStatus(box, d, num) {
     var done = d.status === 'delivered';
@@ -134,6 +167,87 @@
       window.saveHist('📦 تتبّع طرد', esc(d.status_ar || d.status));
     }
   }
+
+
+  function askSub(box) {
+    api({ action: 'status' }).then(function (r) {
+      var p = (r && r.prices) || {};
+      box.innerHTML =
+        '<div style="background:linear-gradient(160deg,var(--gold-dim),var(--panel));' +
+          'border:1px solid var(--gold);border-radius:var(--r);padding:18px;text-align:center;">' +
+          '<div style="font-size:2rem;">📦</div>' +
+          '<div style="font-size:1rem;font-weight:800;margin:6px 0 8px;">' +
+            'انتهت محاولاتك المجانية</div>' +
+          '<div style="font-size:.82rem;color:var(--muted);line-height:1.8;margin-bottom:14px;">' +
+            'تتبّع طرودك داخل تاجر بلا فتح مواقع الشركات، مع سجلّ الأحداث كاملاً.</div>' +
+
+          '<div style="display:flex;gap:8px;margin-bottom:12px;">' +
+            '<div style="flex:1;background:var(--panel);border:1px solid var(--line);' +
+              'border-radius:12px;padding:12px;">' +
+              '<div style="font-size:.68rem;color:var(--muted);">شهري</div>' +
+              '<div style="font-size:1.1rem;font-weight:800;color:var(--gold);">' +
+                (p.dzd_m || '1250') + ' دج</div>' +
+              '<div style="font-size:.64rem;color:var(--muted);">أو $' + (p.usd_m || '5') + '</div>' +
+            '</div>' +
+            '<div style="flex:1;background:var(--panel);border:1px solid var(--gold);' +
+              'border-radius:12px;padding:12px;position:relative;">' +
+              '<div style="position:absolute;top:-9px;inset-inline-start:50%;' +
+                'transform:translateX(-50%);background:var(--gold);color:var(--ink);' +
+                'font-size:.58rem;font-weight:800;padding:2px 9px;border-radius:20px;">' +
+                'وفّر 47%</div>' +
+              '<div style="font-size:.68rem;color:var(--muted);">سنوي</div>' +
+              '<div style="font-size:1.1rem;font-weight:800;color:var(--gold);">' +
+                (p.dzd_y || '8000') + ' دج</div>' +
+              '<div style="font-size:.64rem;color:var(--muted);">أو $' + (p.usd_y || '35') + '</div>' +
+            '</div>' +
+          '</div>' +
+
+          '<div style="background:rgba(46,204,113,.1);border:1px solid rgba(46,204,113,.3);' +
+            'border-radius:10px;padding:11px;font-size:.8rem;color:#2ECC71;margin-bottom:10px;">' +
+            '✨ مشمولة <b>مجاناً</b> مع اشتراك برو وبرو ماكس</div>' +
+
+          // تنبيه إلزامي قبل الدفع: من لا يملك حساباً لن يستفيد
+          '<div style="background:rgba(243,156,18,.12);border:1px solid rgba(243,156,18,.4);' +
+            'border-radius:10px;padding:12px;font-size:.78rem;line-height:1.8;' +
+            'text-align:start;margin-bottom:12px;">' +
+            '<b style="color:#F39C12;">⚠️ قبل أن تشترك</b><br>' +
+            '<span style="color:var(--text);">هذه الخدمة تتطلّب أن تملك ' +
+            '<b>حساب تاجر</b> لدى ياليدين أو ZR Express أو مايسترو أو نويست، ' +
+            'وأن تُدخل بيانات حسابك مرة واحدة.</span><br>' +
+            '<span style="color:var(--muted);font-size:.74rem;">' +
+            'إن كنت تشتري لنفسك من علي إكسبريس ولا تملك حساب شحن، ' +
+            '<b>فلن تستفيد من هذا الاشتراك</b> — استعمل زر «فتح موقع الشركة» وهو مجاني.' +
+            '</span>' +
+          '</div>' +
+
+          '<label style="display:flex;align-items:flex-start;gap:8px;text-align:start;' +
+            'font-size:.78rem;color:var(--muted);margin-bottom:12px;cursor:pointer;">' +
+            '<input type="checkbox" id="subOk" onchange="tjSubOk()" ' +
+              'style="margin-top:3px;flex-shrink:0;width:auto;">' +
+            '<span>أفهم أنّي أحتاج حساب تاجر لدى إحدى هذه الشركات.</span>' +
+          '</label>' +
+
+          '<button class="btn-gold" id="subBtn" disabled onclick="goTab(\'pr\')" ' +
+            'style="width:100%;opacity:.45;">اشترك الآن</button>' +
+        '</div>';
+    }).catch(function () {
+      box.innerHTML = '<div style="color:var(--muted);font-size:.83rem;">' +
+        'انتهت محاولاتك المجانية. اشترك للمتابعة.</div>';
+    });
+  }
+
+  // زرّ الاشتراك يفتح تبويب الاشتراك في التطبيق
+  window.goTab = window.goTab || function (t) {
+    if (typeof window.nav === 'function') window.nav(t);
+    else location.href = '/';
+  };
+
+  window.tjSubOk = function () {
+    var c = el('subOk'), b = el('subBtn');
+    if (!c || !b) return;
+    b.disabled = !c.checked;
+    b.style.opacity = c.checked ? '1' : '.45';
+  };
 
   function askLink(box, co) {
     var c = LIVE[co];
