@@ -227,8 +227,15 @@
             '<span>أفهم أنّي أحتاج حساب تاجر لدى إحدى هذه الشركات.</span>' +
           '</label>' +
 
-          '<button class="btn-gold" id="subBtn" disabled onclick="goTab(\'pr\')" ' +
-            'style="width:100%;opacity:.45;">اشترك الآن</button>' +
+          '<button class="btn-gold" id="subBtn" disabled ' +
+            'onclick="tjSubPay(\'month\')" style="width:100%;opacity:.45;">' +
+            'اشترك شهرياً — ' + (p.dzd_m || '1250') + ' دج</button>' +
+          '<button class="btn-copy" id="subBtnY" disabled ' +
+            'onclick="tjSubPay(\'year\')" style="width:100%;margin-top:8px;opacity:.45;">' +
+            'اشترك سنوياً — ' + (p.dzd_y || '8000') + ' دج</button>' +
+          '<button class="btn-copy" id="subBtnU" disabled ' +
+            'onclick="tjSubPay(\'month\',\'USD\')" style="width:100%;margin-top:8px;opacity:.45;' +
+            'font-size:.78rem;">أو ادفع بـ USDT — $' + (p.usd_m || '5') + ' شهرياً</button>' +
         '</div>';
     }).catch(function () {
       box.innerHTML = '<div style="color:var(--muted);font-size:.83rem;">' +
@@ -243,11 +250,90 @@
   };
 
   window.tjSubOk = function () {
-    var c = el('subOk'), b = el('subBtn');
-    if (!c || !b) return;
-    b.disabled = !c.checked;
-    b.style.opacity = c.checked ? '1' : '.45';
+    var c = el('subOk');
+    if (!c) return;
+    ['subBtn', 'subBtnY', 'subBtnU'].forEach(function (id) {
+      var b = el(id);
+      if (!b) return;
+      b.disabled = !c.checked;
+      b.style.opacity = c.checked ? '1' : '.45';
+    });
   };
+
+  // ── الدفع ──
+  var SUBFN = 'https://rnaqsvmtszxgbvzaagzx.supabase.co/functions/v1/track-sub';
+  function subApi(payload) {
+    var s = sess();
+    return fetch(SUBFN, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json', apikey: SBK,
+        Authorization: 'Bearer ' + ((s && s.access_token) ? s.access_token : SBK)
+      },
+      body: JSON.stringify(payload)
+    }).then(function (r) { return r.json().catch(function () { return {}; }); });
+  }
+
+  window.tjSubPay = function (cycle, currency) {
+    var box = el('trLive');
+    box.innerHTML = '<div style="text-align:center;color:var(--muted);padding:18px;">' +
+      '⏳ جارٍ تجهيز الدفع…</div>';
+    subApi({ action: 'checkout', cycle: cycle, currency: currency || 'DZD' })
+      .then(function (d) {
+        if (d && d.ok && d.checkout_url) {
+          try { sessionStorage.setItem('tj_track_order', d.order_id); } catch (e) {}
+          location.href = d.checkout_url;
+          return;
+        }
+        var msgs = {
+          card_disabled: 'الدفع بالبطاقة غير مفعّل حالياً.',
+          intl_disabled: 'الدفع بـ USDT غير مفعّل حالياً.',
+          gateway_error: 'تعذّر الاتصال ببوابة الدفع. حاول بعد قليل.',
+          login_required: 'سجّل الدخول أولاً.'
+        };
+        box.innerHTML = '<div style="color:#E74C3C;font-size:.83rem;">❌ ' +
+          esc(msgs[d && d.error] || 'تعذّر بدء الدفع.') + '</div>';
+      })
+      .catch(function () {
+        box.innerHTML = '<div style="color:#E74C3C;font-size:.83rem;">تعذّر الاتصال.</div>';
+      });
+  };
+
+  // بعد العودة من بوابة الدفع
+  function afterSubPay() {
+    var q = null;
+    try { q = new URLSearchParams(location.search); } catch (e) { return; }
+    if (q.get('track_sub') !== 'ok') {
+      if (q.get('track_sub') === 'fail' && typeof window.showToast === 'function') {
+        window.showToast('أُلغيت عملية الدفع');
+        try { history.replaceState({}, '', location.pathname); } catch (e) {}
+      }
+      return;
+    }
+    var oid = q.get('o');
+    if (!oid) { try { oid = sessionStorage.getItem('tj_track_order'); } catch (e) {} }
+    if (!oid) return;
+    try { history.replaceState({}, '', location.pathname); } catch (e) {}
+
+    var tries = 0;
+    (function poll() {
+      tries++;
+      subApi({ action: 'verify', order_id: oid }).then(function (d) {
+        if (d && d.ok) {
+          try { sessionStorage.removeItem('tj_track_order'); } catch (e) {}
+          if (typeof window.showToast === 'function') {
+            window.showToast('✅ فُعّل اشتراك تتبّع الطرود');
+          }
+          return;
+        }
+        if (tries < 5) setTimeout(poll, 2500);
+      }).catch(function () {});
+    })();
+  }
+
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', function () { setTimeout(afterSubPay, 900); });
+  } else { setTimeout(afterSubPay, 900); }
 
   function askLink(box, co) {
     var c = LIVE[co];
