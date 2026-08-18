@@ -168,7 +168,11 @@
       '<div class="f-label">اسم للطرد (اختياري)</div>' +
       '<input class="f-input" id="trName" maxlength="40" placeholder="طلبية محمد — حقيبة">' +
 
-      '<button class="btn-gold" onclick="tjTrGo()">🔍 تتبّع الآن</button>' +
+      '<button class="btn-gold" onclick="typeof tjTrLive===\'function\'?tjTrLive():tjTrGo()">' +
+        '📡 اعرض الحالة هنا</button>' +
+      '<div id="trLive" style="display:none;margin-top:14px;"></div>' +
+      '<button class="btn-copy" style="width:100%;margin-top:8px;" onclick="tjTrGo()">' +
+        '🔗 فتح موقع الشركة</button>' +
       '<button class="btn-copy" style="width:100%;margin-top:8px;" onclick="tjTrSave()">' +
         '💾 حفظ في قائمتي</button>' +
       '<div id="trErr" style="display:none;color:#E74C3C;font-size:.82rem;margin-top:10px;"></div>' +
