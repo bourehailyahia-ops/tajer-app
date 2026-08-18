@@ -92,6 +92,9 @@ border-bottom:1px solid var(--line)}
       <div class="st"><b id="kClicks">—</b><span>نقرة إحالة</span></div>
     </div>
 
+    <h2>📦 تتبّع الطرود — هذا الشهر</h2>
+    <div id="trkBox"><p class="empty">—</p></div>
+
     <h2>🔎 قِمع الشراء — آخر 30 يوماً</h2>
     <div class="card">
       <div id="funnel"><p class="empty">جارٍ التحميل…</p></div>
@@ -154,6 +157,26 @@ async function appSession() {
     if (data && data.session) return data.session;
   } catch (_) {}
   return raw.user && raw.user.id ? { user: raw.user } : null;
+}
+
+async function loadTrack() {
+  const { data, error } = await sb.rpc('admin_track_stats');
+  if (error || !data || data.error) { $('trkBox').innerHTML = ''; return; }
+  const top = (data.top_users || []).map((u) =>
+    `<tr><td>${esc(u.email)}</td><td class="num">${u.calls}</td></tr>`).join('');
+  const byc = (data.by_courier || []).map((c) =>
+    `<tr><td>${esc(c.courier)}</td><td class="num">${c.calls}</td></tr>`).join('');
+  $('trkBox').innerHTML = `
+    <div class="stats">
+      <div class="st"><b>${data.calls_today ?? 0}</b><span>استعلام اليوم</span></div>
+      <div class="st"><b>${data.calls_month ?? 0}</b><span>هذا الشهر</span></div>
+      <div class="st"><b>${data.users_month ?? 0}</b><span>مستخدم نشط</span></div>
+      <div class="st"><b>${data.subs_active ?? 0}</b><span>اشتراك فعّال</span></div>
+      <div class="st"><b>${data.linked ?? 0}</b><span>حساب مربوط</span></div>
+      <div class="st"><b>${data.parcels ?? 0}</b><span>طرد متتبَّع</span></div>
+    </div>
+    ${top ? `<table class="ftbl"><tr><th>الأكثر استعمالاً</th><th class="num">مرات</th></tr>${top}</table>` : ''}
+    ${byc ? `<table class="ftbl"><tr><th>حسب الشركة</th><th class="num">مرات</th></tr>${byc}</table>` : ''}`;
 }
 
 async function loadFunnel() {
@@ -223,6 +246,7 @@ async function load() {
   renderProducts(data.products_pending || []);
   renderPayouts(data.payouts_pending || []);
   loadFunnel();
+  loadTrack();
 }
 
 function renderSellers(rows) {
@@ -333,4 +357,4 @@ window.markPayout = async (id, status) => {
 })().catch(() => { hide('loading'); show('denied'); });
 </script>
 </body>
-  </html>
+</html>
