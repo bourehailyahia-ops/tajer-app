@@ -171,7 +171,9 @@ async function loadTrack() {
       <div class="st"><b>${data.calls_today ?? 0}</b><span>استعلام اليوم</span></div>
       <div class="st"><b>${data.calls_month ?? 0}</b><span>هذا الشهر</span></div>
       <div class="st"><b>${data.users_month ?? 0}</b><span>مستخدم نشط</span></div>
-      <div class="st"><b>${data.subs_active ?? 0}</b><span>اشتراك فعّال</span></div>
+      <div class="st"><b>${data.paid_subs ?? 0}</b><span>اشتراك مدفوع</span></div>
+      <div class="st"><b>${data.via_pro ?? 0}</b><span>مجاني مع برو</span></div>
+      <div class="st"><b>${dz(data.revenue_dzd)}</b><span>إيراد التتبّع</span></div>
       <div class="st"><b>${data.linked ?? 0}</b><span>حساب مربوط</span></div>
       <div class="st"><b>${data.parcels ?? 0}</b><span>طرد متتبَّع</span></div>
     </div>
@@ -357,4 +359,4 @@ window.markPayout = async (id, status) => {
 })().catch(() => { hide('loading'); show('denied'); });
 </script>
 </body>
-</html>
+  </html>
