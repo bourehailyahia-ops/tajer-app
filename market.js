@@ -204,8 +204,15 @@
     track('click_buy', { product: productId, currency: currency });
     if (!sess()) {
       track('failed', { product: productId, detail: 'login_required' });
-      toast('سجّل الدخول أولاً لإتمام الشراء');
+      // نحفظ ما أراد شراءه، ونُكمل تلقائياً بعد تسجيل الدخول.
+      // بدون هذا كان المستخدم يُنقل لصفحة حسابه وينسى المنتج.
+      try {
+        sessionStorage.setItem('tj_pending_buy',
+          JSON.stringify({ p: productId, c: currency, t: Date.now() }));
+      } catch (e) {}
+      toast('سجّل الدخول لإتمام الشراء — سنكمل تلقائياً');
       if (typeof window.openAuth === 'function') window.openAuth();
+      watchLogin();
       return;
     }
     modal('<p style="margin:0">جارٍ تجهيز الدفع…</p>');
@@ -241,6 +248,35 @@
       });
   }
   window.mkBuy = buy;
+
+  // يراقب تسجيل الدخول ثم يستأنف الشراء المعلّق
+  var loginWatch = null;
+  function watchLogin() {
+    if (loginWatch) return;
+    var tries = 0;
+    loginWatch = setInterval(function () {
+      tries++;
+      if (tries > 240) { clearInterval(loginWatch); loginWatch = null; return; }
+      if (!sess()) return;
+      clearInterval(loginWatch); loginWatch = null;
+      setTimeout(resumeBuy, 700);
+    }, 1000);
+  }
+
+  function resumeBuy() {
+    var raw = null;
+    try { raw = sessionStorage.getItem('tj_pending_buy'); } catch (e) {}
+    if (!raw) return;
+    var p = null;
+    try { p = JSON.parse(raw); } catch (e) {}
+    try { sessionStorage.removeItem('tj_pending_buy'); } catch (e) {}
+    if (!p || !p.p) return;
+    // نتجاهل الطلبات القديمة (أكثر من 30 دقيقة)
+    if (p.t && (Date.now() - p.t) > 1800000) return;
+    if (!sess()) return;
+    toast('نُكمل عملية الشراء…');
+    buy(p.p, p.c || 'DZD');
+  }
 
   // ---------- 3) فتح منتج قادم من صفحة بائع ----------
   function openProduct(pid) {
@@ -344,6 +380,7 @@
 
   function start() {
     try { healSession(); } catch (e) {}
+    try { setTimeout(resumeBuy, 1600); } catch (e) {}
     try { installBgFix(); } catch (e) {}
     try { if (q('from') === 'store') track('view_store', { detail: q('s') || '' }); } catch (e) {}
     try { captureRef(); } catch (e) {}
