@@ -100,9 +100,13 @@
 
     body.appendChild(d);
     d.querySelector('.tj-sug-btn').addEventListener('click', function () {
-      if (typeof window.mkOpenProduct === 'function') { window.mkOpenProduct(p.id); return; }
-      if (typeof window.goFree === 'function') { window.goFree('products'); return; }
-      location.href = '/s/yahia';
+      // 1) الدالّة المباشرة إن كانت متاحة
+      if (typeof window.mkOpenProduct === 'function') {
+        window.mkOpenProduct(p.id);
+        return;
+      }
+      // 2) وإلا نفتح المنتج برابطه — market.js يلتقط ?p= ويفتح النافذة
+      location.href = '/?p=' + encodeURIComponent(p.id);
     });
   }
 
