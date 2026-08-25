@@ -159,9 +159,6 @@ font-size:.58rem;font-weight:800;text-align:center;padding:2px}
         <div><label>الصيغة</label><input id="nFmt" placeholder="PDF"></div>
         <div><label>الحجم/الصفحات</label><input id="nPages" placeholder="120 صفحة"></div>
       </div>
-      <label>رابط المعاينة المجانية (اختياري)</label>
-      <input id="nPrev" placeholder="https://...">
-
       <div class="up-box">
         <div class="up-t">🖼️ صور المنتج</div>
         <div class="up-s">أول صورة تصبح الغلاف. حتى 6 صور — اختر من معرض هاتفك.</div>
@@ -409,7 +406,6 @@ window.addProduct = async () => {
       price_usd: Number($('nUsd').value) || null,
       file_format: $('nFmt').value.trim() || null,
       pages: $('nPages').value.trim() || null,
-      preview_url: $('nPrev').value.trim() || null,
       cover_url: imgUrls[0] || null,
       gallery: imgUrls,
       file_path: filePath,
@@ -419,7 +415,7 @@ window.addProduct = async () => {
     if (error) throw new Error(error.message);
 
     note('addMsg', 'أُرسل المنتج للمراجعة ✓', 'good');
-    ['nTitle','nSub','nDesc','nDzd','nUsd','nFmt','nPages','nPrev']
+    ['nTitle','nSub','nDesc','nDzd','nUsd','nFmt','nPages']
       .forEach((i) => { $(i).value = ''; });
     if (window.tjResetUploads) window.tjResetUploads();
     loadProducts();
@@ -433,4 +429,4 @@ window.addProduct = async () => {
 init().catch(() => { hide('loading'); show('noauth'); });
 </script>
 </body>
-  </html>
+        </html>
