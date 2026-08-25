@@ -255,7 +255,7 @@ padding:14px;border-radius:12px;text-decoration:none;font-size:.95rem}
     <div class="sell-ic">💰</div>
     <h2 class="sell-t">بِع منتجاتك الرقمية واربح</h2>
     <p class="sell-p">
-      عندك دليل أو قالب أو دورة؟ اعرضها على تاجر واحتفظ بـ<b>70%</b> من كل عملية بيع.
+      عندك دليل أو قالب أو دورة؟ اعرضها على تاجر واحتفظ بـ<b>90%</b> من كل عملية بيع.
       نعطيك صفحة متجر خاصة بك مثل هذه، ونتكفّل بالدفع والتسليم.
     </p>
     <ul class="sell-l">
@@ -282,4 +282,4 @@ padding:14px;border-radius:12px;text-decoration:none;font-size:.95rem}
   // كاش على الحافة مع إعادة تحقّق — الصفحة سريعة والتحديث يظهر خلال دقيقة
   res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=600');
   res.status(200).send(html);
-                    }
+    }
