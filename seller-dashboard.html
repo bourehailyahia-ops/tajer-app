@@ -50,6 +50,21 @@ border-radius:10px;padding:11px;color:var(--text);font-size:.88rem;font-family:i
 .hide{display:none}
 .link-box{background:#0f1218;border:1px solid var(--line);border-radius:10px;
 padding:10px;font-size:.74rem;word-break:break-all;color:var(--gold);margin-top:6px}
+.up-box{background:#12151c;border:1px solid #242a36;border-radius:12px;padding:14px;margin-top:14px}
+.up-t{font-size:.86rem;font-weight:700;margin-bottom:3px}
+.up-s{font-size:.72rem;color:#9aa0a6;line-height:1.6}
+.up-btn{display:block;text-align:center;background:transparent;border:1.5px dashed #242a36;
+border-radius:10px;padding:14px;margin-top:10px;cursor:pointer;font-size:.85rem;font-family:inherit}
+.up-btn:active{opacity:.7}
+.img-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:7px;margin-top:10px}
+.img-cell{position:relative;aspect-ratio:1;border-radius:9px;overflow:hidden;border:1px solid #242a36}
+.img-cell img{width:100%;height:100%;object-fit:cover;display:block}
+.img-x{position:absolute;top:3px;inset-inline-end:3px;background:rgba(0,0,0,.75);color:#fff;
+border:0;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:.75rem;line-height:1;font-family:inherit}
+.img-c{position:absolute;bottom:0;inset-inline:0;background:#C9A84C;color:#12151c;
+font-size:.58rem;font-weight:800;text-align:center;padding:2px}
+.bar{height:5px;background:#242a36;border-radius:99px;overflow:hidden;margin-top:9px}
+.fill{height:100%;width:0;background:#C9A84C;transition:width .25s}
 </style>
 </head>
 <body>
@@ -146,6 +161,29 @@ padding:10px;font-size:.74rem;word-break:break-all;color:var(--gold);margin-top:
       </div>
       <label>رابط المعاينة المجانية (اختياري)</label>
       <input id="nPrev" placeholder="https://...">
+
+      <div class="up-box">
+        <div class="up-t">🖼️ صور المنتج</div>
+        <div class="up-s">أول صورة تصبح الغلاف. حتى 6 صور — اختر من معرض هاتفك.</div>
+        <label class="up-btn">
+          <input type="file" id="nImgs" accept="image/*" multiple hidden>
+          📷 اختر الصور
+        </label>
+        <div id="imgGrid" class="img-grid"></div>
+        <div id="imgBar" class="bar hide"><div id="imgFill" class="fill"></div></div>
+      </div>
+
+      <div class="up-box">
+        <div class="up-t">📦 ملف المنتج <span style="color:#E74C3C">*</span></div>
+        <div class="up-s">الملف الذي يحمّله المشتري بعد الدفع. حتى 50 م.ب.</div>
+        <label class="up-btn">
+          <input type="file" id="nFile" hidden>
+          📎 اختر الملف
+        </label>
+        <div id="fileName" class="up-s" style="margin-top:8px"></div>
+        <div id="fileBar" class="bar hide"><div id="fileFill" class="fill"></div></div>
+      </div>
+
       <button class="btn" style="margin-top:13px" onclick="addProduct()">إضافة للمراجعة</button>
       <p class="muted" style="margin:9px 0 0;font-size:.74rem">
         كل منتج جديد يمرّ بمراجعة الإدارة قبل الظهور في متجرك.
@@ -342,33 +380,101 @@ window.requestPayout = async () => {
   loadBalances(); loadPayouts();
 };
 
-window.addProduct = async () => {
-  const title = $('nTitle').value.trim();
-  const dzd = Number($('nDzd').value);
-  if (title.length < 3) return note('addMsg', 'اكتب اسم المنتج (3 أحرف على الأقل).');
-  if (!(dzd > 0)) return note('addMsg', 'أدخل سعراً صحيحاً بالدينار.');
 
-  const slug = (title.toLowerCase().replace(/[^a-z0-9\u0621-\u064a]+/g, '-')
-    .replace(/^-|-$/g, '') || 'product') + '-' + Date.now().toString(36).slice(-4);
+// ════════ الرفع المباشر من الهاتف ════════
+let pickedImgs = [];   // {file, url}
+let pickedFile = null;
 
-  const { error } = await sb.from('digital_products').insert({
-    seller_id: seller.id, slug, title,
-    subtitle: $('nSub').value.trim() || null,
-    description: $('nDesc').value.trim() || null,
-    price_dzd: dzd,
-    price_usd: Number($('nUsd').value) || null,
-    file_format: $('nFmt').value.trim() || null,
-    pages: $('nPages').value.trim() || null,
-    preview_url: $('nPrev').value.trim() || null,
-    status: 'pending', active: false,
-  });
-  if (error) return note('addMsg', 'تعذّرت الإضافة: ' + error.message);
-  note('addMsg', 'أُرسل المنتج للمراجعة ✓', 'good');
-  ['nTitle','nSub','nDesc','nDzd','nUsd','nFmt','nPages','nPrev'].forEach((i) => { $(i).value = ''; });
-  loadProducts();
+function bindUploads() {
+  const imgs = $('nImgs'), file = $('nFile');
+  if (imgs && !imgs.__b) {
+    imgs.__b = 1;
+    imgs.addEventListener('change', () => {
+      const list = Array.from(imgs.files || []);
+      for (const f of list) {
+        if (pickedImgs.length >= 6) break;
+        if (!f.type.startsWith('image/')) continue;
+        if (f.size > 8 * 1024 * 1024) {          // 8 م.ب لكل صورة
+          note('addMsg', 'صورة كبيرة جداً: ' + f.name.slice(0, 24));
+          continue;
+        }
+        pickedImgs.push({ file: f, url: URL.createObjectURL(f) });
+      }
+      imgs.value = '';
+      drawImgs();
+    });
+  }
+  if (file && !file.__b) {
+    file.__b = 1;
+    file.addEventListener('change', () => {
+      const f = file.files && file.files[0];
+      if (!f) return;
+      if (f.size > 50 * 1024 * 1024) {
+        note('addMsg', 'الملف أكبر من 50 م.ب.');
+        file.value = ''; return;
+      }
+      pickedFile = f;
+      $('fileName').innerHTML = '✓ ' + esc(f.name.slice(0, 40)) +
+        ' <span style="color:#9aa0a6">(' + (f.size / 1048576).toFixed(1) + ' م.ب)</span>';
+    });
+  }
+}
+
+function drawImgs() {
+  const g = $('imgGrid');
+  if (!g) return;
+  g.innerHTML = pickedImgs.map((p, i) =>
+    '<div class="img-cell"><img src="' + p.url + '">' +
+    '<button class="img-x" onclick="rmImg(' + i + ')">✕</button>' +
+    (i === 0 ? '<div class="img-c">الغلاف</div>' : '') +
+    '</div>').join('');
+}
+
+window.rmImg = (i) => {
+  try { URL.revokeObjectURL(pickedImgs[i].url); } catch (e) {}
+  pickedImgs.splice(i, 1);
+  drawImgs();
 };
 
-init().catch(() => { hide('loading'); show('noauth'); });
-</script>
-</body>
-        </html>
+// تصغير الصورة قبل الرفع: أسرع بكثير على شبكة الهاتف
+function shrinkImg(f, max = 1400) {
+  return new Promise((resolve) => {
+    const fr = new FileReader();
+    fr.onerror = () => resolve(f);
+    fr.onload = () => {
+      const im = new Image();
+      im.onerror = () => resolve(f);
+      im.onload = () => {
+        let w = im.width, h = im.height;
+        if (w <= max && h <= max && f.size < 400000) return resolve(f);
+        if (w > h) { h = Math.round(h * max / w); w = max; }
+        else { w = Math.round(w * max / h); h = max; }
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(im, 0, 0, w, h);
+        cv.toBlob((b) => resolve(b && b.size < f.size ? b : f), 'image/jpeg', 0.85);
+      };
+      im.src = fr.result;
+    };
+    fr.readAsDataURL(f);
+  });
+}
+
+const safeName = (n) => String(n).replace(/[^\w.\-]+/g, '_').slice(-60);
+
+async function uploadImages(uid) {
+  if (!pickedImgs.length) return [];
+  const bar = $('imgBar'), fill = $('imgFill');
+  bar.classList.remove('hide');
+  const urls = [];
+  for (let i = 0; i < pickedImgs.length; i++) {
+    const blob = await shrinkImg(pickedImgs[i].file);
+    const path = uid + '/' + Date.now() + '_' + i + '_' + safeName(pickedImgs[i].file.name);
+    const { error } = await sb.storage.from('product-images')
+      .upload(path, blob, { contentType: blob.type || 'image/jpeg', upsert: false });
+    if (error) throw new Error('تعذّر رفع الصورة: ' + error.message);
+    const { data } = sb.storage.from('product-images').getPublicUrl(path);
+    urls.push(data.publicUrl);
+    fill.style.width = Math.round(((i + 1) / pickedImgs.length) * 100) + '%';
+  }
+  return 
