@@ -172,6 +172,31 @@
   }
 
   // نكشف ما تحتاجه اللوحة
+
+  // دوال عامة يستعملها edit.js لرفع صور وملفات منتج موجود
+  window.tjUploadList = async function (uid, files, onProgress) {
+    var urls = [];
+    for (var i = 0; i < files.length; i++) {
+      var blob = await shrinkImg(files[i]);
+      var path = uid + '/' + Date.now() + '_e' + i + '_' + safeName(files[i].name);
+      try {
+        await putFile('product-images', path, blob, blob.type || 'image/jpeg');
+      } catch (e) { throw new Error('تعذّر رفع الصورة: ' + e.message); }
+      urls.push(publicUrl('product-images', path));
+      if (onProgress) onProgress(Math.round(((i + 1) / files.length) * 100));
+    }
+    return urls;
+  };
+
+  window.tjUploadOne = async function (uid, file) {
+    var path = uid + '/' + Date.now() + '_' + safeName(file.name);
+    try {
+      await putFile('product-files', path, file,
+        file.type || 'application/octet-stream');
+    } catch (e) { throw new Error('تعذّر رفع الملف: ' + e.message); }
+    return path;
+  };
+
   window.tjUploadImages = uploadImages;
   window.tjUploadFile   = uploadFile;
   window.tjResetUploads = resetUploads;
