@@ -65,6 +65,10 @@ border:0;border-radius:50%;width:22px;height:22px;cursor:pointer;font-size:.75re
 font-size:.58rem;font-weight:800;text-align:center;padding:2px}
 .bar{height:5px;background:#242a36;border-radius:99px;overflow:hidden;margin-top:9px}
 .fill{height:100%;width:0;background:#C9A84C;transition:width .25s}
+.ic-img{width:44px;height:44px;border-radius:10px;object-fit:cover;flex-shrink:0}
+.edit-b{background:transparent;border:1px solid #242a36;color:#C9A84C;border-radius:9px;
+padding:8px 13px;font-size:.76rem;cursor:pointer;font-family:inherit;flex-shrink:0}
+.tag.warn{background:rgba(231,76,60,.15);color:#E74C3C}
 </style>
 </head>
 <body>
@@ -217,6 +221,7 @@ font-size:.58rem;font-weight:800;text-align:center;padding:2px}
 
 <script src="/upload.js?v=1"></script>
 <script src="/payout.js?v=1"></script>
+<script src="/edit.js?v=1"></script>
 <script type="module">
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/+esm';
 
@@ -334,9 +339,10 @@ async function loadBalances() {
   $('payoutBtn').disabled = !(Number(data?.available_dzd) > 0);
 }
 
+window.tjReloadProducts = () => loadProducts();
 async function loadProducts() {
   const { data } = await sb.from('digital_products')
-    .select('id, title, subtitle, icon, price_dzd, price_usd, status, sales_count')
+    .select('id, title, subtitle, description, icon, price_dzd, price_usd, status, sales_count, cover_url, gallery, file_path, file_url, file_format, pages')
     .eq('seller_id', seller.id).order('created_at', { ascending: false });
   const rows = data || [];
   $('pCount').textContent = rows.length;
@@ -347,13 +353,18 @@ async function loadProducts() {
                   hidden: '<span class="tag">مخفي</span>' };
   $('prodList').innerHTML = rows.length ? rows.map((p) => `
     <div class="prod">
-      <span class="ic">${esc(p.icon || '📘')}</span>
+      ${p.cover_url
+        ? `<img src="${esc(p.cover_url)}" class="ic-img" alt="">`
+        : `<span class="ic">${esc(p.icon || '📘')}</span>`}
       <div class="grow">
         <div class="pt">${esc(p.title)}</div>
         <div class="ps">${dz(p.price_dzd)}${p.price_usd ? ` · $${Number(p.price_usd).toFixed(2)}` : ''}
           ${p.sales_count > 0 ? ` · ${p.sales_count} مبيع` : ''}</div>
-        <div style="margin-top:5px">${badge[p.status] || ''}</div>
+        <div style="margin-top:5px">${badge[p.status] || ''}
+          ${!p.cover_url ? '<span class="tag warn">بلا صورة</span>' : ''}
+          ${!p.file_path && !p.file_url ? '<span class="tag warn">بلا ملف</span>' : ''}</div>
       </div>
+      <button class="edit-b" onclick="editProduct('${p.id}')">تعديل</button>
     </div>`).join('') : '<p class="muted">لا منتجات بعد. أضف أوّل منتج من الأسفل.</p>';
 }
 
@@ -434,18 +445,4 @@ window.addProduct = async () => {
     if (error) throw new Error(error.message);
 
     note('addMsg', 'أُرسل المنتج للمراجعة ✓', 'good');
-    ['nTitle','nSub','nDesc','nDzd','nUsd','nFmt','nPages']
-      .forEach((i) => { $(i).value = ''; });
-    if (window.tjResetUploads) window.tjResetUploads();
-    loadProducts();
-  } catch (e) {
-    note('addMsg', String(e.message || e).slice(0, 160));
-  } finally {
-    if (btn) { btn.disabled = false; btn.textContent = 'إضافة للمراجعة'; }
-  }
-};
-
-init().catch(() => { hide('loading'); show('noauth'); });
-</script>
-</body>
-          </html>
+    ['nTitle','nSub','nDesc','nDzd','nUsd','nFmt','nPages'
