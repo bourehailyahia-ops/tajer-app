@@ -89,6 +89,7 @@ border-bottom:1px solid var(--line)}
       <div class="st"><b id="kOrders">—</b><span>عملية بيع</span></div>
       <div class="st"><b id="kPlatform">—</b><span>أرباحك</span></div>
       <div class="st"><b id="kOwed">—</b><span>مستحق للبائعين</span></div>
+      <div class="st"><b id="kFees">—</b><span>رسوم البوابة</span></div>
       <div class="st"><b id="kClicks">—</b><span>نقرة إحالة</span></div>
     </div>
 
@@ -242,6 +243,7 @@ async function load() {
   $('kOrders').textContent   = s.orders_paid ?? 0;
   $('kPlatform').textContent = dz(s.platform_dzd);
   $('kOwed').textContent     = dz(s.owed_dzd);
+  $('kFees').textContent     = dz(s.fees_dzd);
   $('kClicks').textContent   = s.clicks_count ?? 0;
 
   renderSellers(data.sellers_pending || []);
@@ -295,10 +297,11 @@ function renderPayouts(rows) {
   $('nPayouts').textContent = rows.length;
   $('payouts').innerHTML = rows.length ? rows.map((r) => `
     <div class="card" id="yc_${r.id}">
-      <div class="ttl">${dz(r.amount_dzd)}</div>
+      <div class="ttl">${dz(r.amount_dzd)}${r.amount_usdt ? ` <span style="font-size:.8rem;color:var(--muted)">≈ ${r.amount_usdt} USDT</span>` : ''}</div>
       <div class="sub">${esc(r.seller_name)} · ${r.orders_count} عملية · #${r.payout_no}</div>
       <div class="kv">
-        <b>${esc(r.method)}</b>: ${esc(r.details || '—')}
+        <b>${r.method === 'usdt' ? '₮ USDT (' + esc(r.usdt_network || 'TRC20') + ')' : '📱 BaridiMob'}</b>:
+        <span style="direction:ltr;display:inline-block">${esc(r.details || '—')}</span>
         ${r.payout_name ? `<br>باسم: <b>${esc(r.payout_name)}</b>` : ''}
         <br><span class="pill">${day(r.created_at)}</span>
         <span class="pill">${r.status === 'processing' ? 'جارٍ التحويل' : 'بانتظار'}</span>
