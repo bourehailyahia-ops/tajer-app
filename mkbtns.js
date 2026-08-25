@@ -60,7 +60,7 @@
           '<div class="set-name">' + (isSeller ? 'لوحة متجري' : 'افتح متجرك وابدأ البيع') + '</div>' +
           '<div class="set-sub">' + (isSeller
             ? 'أرباحي · منتجاتي · /s/' + esc(rows[0].slug)
-            : 'بِع منتجاتك الرقمية واحتفظ بـ70%') + '</div>' +
+            : 'بِع منتجاتك الرقمية واحتفظ بـ90%') + '</div>' +
           '</div></div>' +
           '<div class="chev"><svg viewBox="0 0 24 24" stroke-width="2">' +
           '<path d="M9 18l6-6-6-6"/></svg></div>';
