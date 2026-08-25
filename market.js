@@ -247,6 +247,7 @@
         toast('تعذّر الاتصال. تحقّق من الإنترنت.');
       });
   }
+  window.mkOpenProduct = openProduct;
   window.mkBuy = buy;
 
   // يراقب تسجيل الدخول ثم يستأنف الشراء المعلّق
