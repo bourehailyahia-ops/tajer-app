@@ -70,7 +70,7 @@ font-weight:800;font-size:.92rem;width:100%;cursor:pointer;font-family:inherit;m
 <div class="hero">
   <div style="font-size:36px">🏪</div>
   <h1>افتح متجرك الرقمي مجاناً</h1>
-  <p>بِع أدلّتك وقوالبك ودوراتك على تاجر، واحتفظ بـ<b>90%</b> من كل عملية بيع.
+  <p>بِع أدلّتك وقوالبك ودوراتك على تاجر، واحتفظ بـ<b>90%</b> من كل عملية بيع — ناقص رسوم بوابة الدفع.
      بلا رسوم اشتراك — تدفع فقط عندما تبيع.</p>
   <div class="feats">
     <div class="f"><span>🔗</span><b>صفحة خاصة بك</b><i>تظهر في جوجل</i></div>
@@ -129,18 +129,17 @@ font-weight:800;font-size:.92rem;width:100%;cursor:pointer;font-family:inherit;m
       <label>الطريقة</label>
       <select id="fMethod">
         <option value="">— اختر لاحقاً —</option>
-        <option value="ccp">CCP — البريد</option>
-        <option value="baridimob">BaridiMob</option>
-        <option value="rib">RIB بنكي</option>
-        <option value="usdt">USDT (TRC20)</option>
+        <option value="baridimob">📱 BaridiMob — تحويل بالدينار</option>
+        <option value="usdt">₮ USDT — شبكة TRC20</option>
       </select>
-      <label>الرقم / العنوان</label>
-      <input id="fDetails" placeholder="رقم الحساب أو عنوان المحفظة">
+      <label>الـ RIB أو عنوان المحفظة</label>
+      <input id="fDetails" dir="ltr" placeholder="0079 9999 1234 5678 9012">
+      <div class="hint">BaridiMob: الـ RIB كاملاً (20 رقماً) · USDT: عنوان TRC20 يبدأ بحرف T</div>
       <div class="hint">يمكنك إضافتها لاحقاً من لوحة متجرك. لا يراها أحد غيرك.</div>
 
       <h2>الشروط</h2>
       <ul class="terms">
-        <li>عمولة المنصّة <b>10%</b> فقط من كل عملية بيع، و<b>90%</b> لك.</li>
+        <li>عمولة المنصّة <b>10%</b> فقط من كل عملية بيع.</li><li><b>رسوم بوابة الدفع</b> (حوالي 2.5% أو 25 دج كحد أدنى) تُخصم من نصيبك — تدفعها البوابة لا نحن. فمن بيع بـ1000 دج تستلم <b>875 دج</b>.</li>
         <li>أرباحك تُجمَّد <b>14 يوماً</b> بعد كل بيع حمايةً من الاسترجاع.</li>
         <li>كل منتج يمرّ بمراجعة قبل النشر.</li>
         <li>تُقرّ بأنك تملك حقوق ما تبيعه، وأنه ليس محتوى مسروقاً أو مخالفاً.</li>
@@ -300,4 +299,4 @@ window.apply = async () => {
 init().catch(() => { hide('loading'); show('noauth'); });
 </script>
 </body>
-  </html>
+    </html>
