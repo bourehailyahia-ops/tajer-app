@@ -157,17 +157,33 @@
     };
   }
 
-  // ── اعتراض الحفظ: نرفع ثم نُحدّث الأعمدة ──
+  // ── اعتراض الحفظ ──
+  // saveProduct مُعرَّفة داخل app.js كـ async function، وقد لا تكون
+  // على window وقت التحميل. فنربط الرفع بزرّ الحفظ نفسه لضمان العمل.
   function hookSave() {
-    if (window.__tjAdSaveHooked) return;
-    if (typeof window.saveProduct !== 'function') return;
-    window.__tjAdSaveHooked = true;
-    var orig = window.saveProduct;
-    window.saveProduct = async function () {
-      var r = await orig.apply(this, arguments);
-      try { await afterSave(); } catch (e) { console.warn(e); }
-      return r;
-    };
+    // أ) إن كانت الدالّة متاحة على window نعترضها
+    if (!window.__tjAdSaveHooked && typeof window.saveProduct === 'function') {
+      window.__tjAdSaveHooked = true;
+      var orig = window.saveProduct;
+      window.saveProduct = async function () {
+        var r = await orig.apply(this, arguments);
+        try { await afterSave(); } catch (e) { console.warn('tj upload:', e); }
+        return r;
+      };
+      return;
+    }
+    // ب) وإلا نربط الزرّ مباشرة
+    var btns = document.querySelectorAll('[onclick*="saveProduct"]');
+    for (var i = 0; i < btns.length; i++) {
+      if (btns[i].__tjB) continue;
+      btns[i].__tjB = 1;
+      btns[i].addEventListener('click', function () {
+        // نمهل الحفظ الأصلي ثم نرفع
+        setTimeout(function () {
+          afterSave().catch(function (e) { console.warn('tj upload:', e); });
+        }, 900);
+      });
+    }
   }
 
   async function afterSave() {
@@ -204,7 +220,8 @@
     if (!Object.keys(patch).length) return;
 
     // نحتاج معرّف المنتج: إن كان جديداً نأخذ الأحدث لهذا البائع
-    var id = curId || $('dpId') && $('dpId').value;
+    var idEl = $('dpId');
+    var id = (idEl && idEl.value) || curId;
     if (!id) {
       var q = await fetch(SB + '/rest/v1/digital_products' +
         '?select=id&order=created_at.desc&limit=1',
@@ -235,4 +252,5 @@
     document.addEventListener('DOMContentLoaded', run);
   } else { run(); }
   [600, 1800, 3500, 6000].forEach(function (ms) { setTimeout(run, ms); });
+  setInterval(run, 2000);
 })();
