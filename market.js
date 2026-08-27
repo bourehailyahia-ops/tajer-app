@@ -282,7 +282,7 @@
   // ---------- 3) فتح منتج قادم من صفحة بائع ----------
   function openProduct(pid) {
     fetch(SB + '/rest/v1/digital_products?id=eq.' + encodeURIComponent(pid) +
-          '&select=id,title,subtitle,description,icon,price_dzd,price_usd,file_format,pages,preview_url,seller_id',
+          '&select=id,title,subtitle,description,icon,price_dzd,price_usd,file_format,pages,preview_url,seller_id,cover_url,gallery',
           { headers: { apikey: KEY, Authorization: 'Bearer ' + KEY } })
       .then(function (r) { return r.json(); })
       .then(function (rows) {
@@ -290,8 +290,28 @@
         if (!p) { toast('المنتج غير متاح.'); return; }
         track('view_product', { product: p.id, amount: p.price_dzd });
         var usd = p.price_usd ? Number(p.price_usd).toFixed(2) : null;
+        var imgs = Array.isArray(p.gallery) ? p.gallery.slice(0, 6) : [];
+        if (!imgs.length && p.cover_url) imgs = [p.cover_url];
+
+        // معرض صور أفقي: أول ما يراه المشتري قبل السعر
+        var head = imgs.length
+          ? '<div style="display:flex;gap:7px;overflow-x:auto;padding-bottom:6px;' +
+              'margin:-4px -4px 10px;scroll-snap-type:x mandatory;">' +
+            imgs.map(function (u, i) {
+              return '<img src="' + esc(u) + '" alt="" loading="lazy" ' +
+                'style="width:' + (imgs.length === 1 ? '100%' : '78%') + ';flex:0 0 auto;' +
+                'aspect-ratio:1;object-fit:cover;border-radius:12px;' +
+                'scroll-snap-align:center;background:#1a1e27">';
+            }).join('') +
+            '</div>' +
+            (imgs.length > 1
+              ? '<div style="font-size:.66rem;color:#9aa0a6;margin:-4px 0 8px">' +
+                '← اسحب لرؤية ' + imgs.length + ' صور</div>'
+              : '')
+          : '<div style="font-size:38px">' + esc(p.icon || '📘') + '</div>';
+
         modal(
-          '<div style="font-size:38px">' + esc(p.icon || '📘') + '</div>' +
+          head +
           '<h3 style="margin:8px 0 4px;font-size:1.05rem">' + esc(p.title) + '</h3>' +
           (p.subtitle ? '<p style="color:#9aa0a6;font-size:.8rem;margin:0 0 10px">' + esc(p.subtitle) + '</p>' : '') +
           (p.description ? '<p style="color:#9aa0a6;font-size:.8rem;text-align:start;margin:10px 0">' +
