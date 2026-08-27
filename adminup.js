@@ -238,7 +238,7 @@
 
     // نحتاج معرّف المنتج: إن كان جديداً نأخذ الأحدث لهذا البائع
     var idEl = $('dpId');
-    var id = (idEl && idEl.value) || curId;
+    var id = (idEl && idEl.value && idEl.value.trim()) || curId;
     if (!id) {
       var q = await fetch(SB + '/rest/v1/digital_products' +
         '?select=id&order=created_at.desc&limit=1',
@@ -248,14 +248,29 @@
     }
     if (!id) return;
 
-    await fetch(SB + '/rest/v1/digital_products?id=eq.' + encodeURIComponent(id), {
+    // نفحص النتيجة: بدون ذلك يفشل الربط صامتاً ولا يعرف أحد.
+    // نطلب return=representation لنتأكّد أن صفاً تغيّر فعلاً.
+    var r = await fetch(SB + '/rest/v1/digital_products?id=eq.' +
+      encodeURIComponent(id) + '&select=id,cover_url', {
       method: 'PATCH',
       headers: {
         apikey: KEY, Authorization: 'Bearer ' + tok,
-        'Content-Type': 'application/json', Prefer: 'return=minimal'
+        'Content-Type': 'application/json', Prefer: 'return=representation'
       },
       body: JSON.stringify(patch)
     });
+
+    if (!r.ok) {
+      var err = await r.json().catch(function () { return {}; });
+      throw new Error('رفض الحفظ (' + r.status + '): ' +
+        (err.message || err.hint || err.code || 'سبب غير معروف'));
+    }
+
+    var rows = await r.json().catch(function () { return []; });
+    if (!rows || !rows.length) {
+      throw new Error('لم يتغيّر أي منتج — تحقّق أن المعرّف صحيح: ' +
+        String(id).slice(0, 12));
+    }
 
     newImgs = []; newFile = null;
   }
