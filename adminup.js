@@ -20,6 +20,81 @@
     catch (e) { return null; }
   }
 
+
+  // نرفع بأنفسنا بدل الاعتماد على upload.js — فهو مبنيّ للوحة البائع
+  // وقد لا يعمل هنا، وكان فشله صامتاً يُظهر نجاحاً كاذباً.
+  var safeName = function (n) {
+    return String(n).replace(/[^\w.\-]+/g, '_').slice(-60);
+  };
+
+  function shrink(f, max) {
+    max = max || 1400;
+    return new Promise(function (resolve) {
+      try {
+        var fr = new FileReader();
+        fr.onerror = function () { resolve(f); };
+        fr.onload = function () {
+          var im = new Image();
+          im.onerror = function () { resolve(f); };
+          im.onload = function () {
+            var w = im.width, h = im.height;
+            if (w <= max && h <= max && f.size < 400000) return resolve(f);
+            if (w > h) { h = Math.round(h * max / w); w = max; }
+            else { w = Math.round(w * max / h); h = max; }
+            var cv = document.createElement('canvas');
+            cv.width = w; cv.height = h;
+            cv.getContext('2d').drawImage(im, 0, 0, w, h);
+            cv.toBlob(function (b) {
+              resolve(b && b.size < f.size ? b : f);
+            }, 'image/jpeg', 0.85);
+          };
+          im.src = fr.result;
+        };
+        fr.readAsDataURL(f);
+      } catch (e) { resolve(f); }
+    });
+  }
+
+  function putFile(bucket, path, blob, type, tok) {
+    return fetch(SB + '/storage/v1/object/' + bucket + '/' + encodeURI(path), {
+      method: 'POST',
+      headers: {
+        Authorization: 'Bearer ' + tok, apikey: KEY,
+        'Content-Type': type || 'application/octet-stream',
+        'x-upsert': 'false'
+      },
+      body: blob
+    }).then(function (r) {
+      if (r.ok) return true;
+      return r.json().catch(function () { return {}; }).then(function (d) {
+        throw new Error(d.message || d.error || ('رمز ' + r.status));
+      });
+    });
+  }
+
+  var pubUrl = function (bucket, path) {
+    return SB + '/storage/v1/object/public/' + bucket + '/' + encodeURI(path);
+  };
+
+  async function uploadImgs(uid, files, tok, onPct) {
+    var urls = [];
+    for (var i = 0; i < files.length; i++) {
+      var blob = await shrink(files[i]);
+      var path = uid + '/' + Date.now() + '_a' + i + '_' + safeName(files[i].name);
+      await putFile('product-images', path, blob, blob.type || 'image/jpeg', tok);
+      urls.push(pubUrl('product-images', path));
+      if (onPct) onPct(Math.round(((i + 1) / files.length) * 100));
+    }
+    return urls;
+  }
+
+  async function uploadOne(uid, file, tok) {
+    var path = uid + '/' + Date.now() + '_' + safeName(file.name);
+    await putFile('product-files', path, file,
+      file.type || 'application/octet-stream', tok);
+    return path;
+  }
+
   var gallery = [];    // الصور الحالية
   var newImgs = [];    // {file,url}
   var newFile = null;
@@ -208,15 +283,14 @@
     var s = sess();
     var uid = s && s.user && s.user.id;
     var tok = s && s.access_token;
-    if (!uid || !tok) return;
+    if (!uid || !tok) throw new Error('سجّل الدخول أولاً');
 
     var patch = {};
     if (newImgs.length) {
-      if (typeof window.tjUploadList !== 'function') return;
-      $('tjIBar').classList.add('on');
-      var added = await window.tjUploadList(uid,
-        newImgs.map(function (x) { return x.file; }),
-        function (pct) { $('tjIFill').style.width = pct + '%'; });
+      var bar = $('tjIBar'); if (bar) bar.classList.add('on');
+      var added = await uploadImgs(uid,
+        newImgs.map(function (x) { return x.file; }), tok,
+        function (pct) { var f = $('tjIFill'); if (f) f.style.width = pct + '%'; });
       var all = gallery.concat(added).slice(0, 6);
       patch.gallery = all;
       patch.cover_url = all[0] || null;
@@ -226,15 +300,14 @@
     }
 
     if (newFile) {
-      if (typeof window.tjUploadOne !== 'function') return;
-      $('tjFBar').classList.add('on');
-      $('tjFFill').style.width = '45%';
-      patch.file_path = await window.tjUploadOne(uid, newFile);
+      var fb = $('tjFBar'); if (fb) fb.classList.add('on');
+      var ff = $('tjFFill'); if (ff) ff.style.width = '45%';
+      patch.file_path = await uploadOne(uid, newFile, tok);
       patch.file_size = (newFile.size / 1048576).toFixed(1) + ' MB';
-      $('tjFFill').style.width = '100%';
+      if (ff) ff.style.width = '100%';
     }
 
-    if (!Object.keys(patch).length) return;
+    if (!Object.keys(patch).length) throw new Error('لا يوجد ما يُحفظ');
 
     // نحتاج معرّف المنتج: إن كان جديداً نأخذ الأحدث لهذا البائع
     var idEl = $('dpId');
@@ -246,7 +319,7 @@
       var rows = await q.json().catch(function () { return []; });
       id = rows && rows[0] && rows[0].id;
     }
-    if (!id) return;
+    if (!id) throw new Error('تعذّر تحديد المنتج');
 
     // نفحص النتيجة: بدون ذلك يفشل الربط صامتاً ولا يعرف أحد.
     // نطلب return=representation لنتأكّد أن صفاً تغيّر فعلاً.
