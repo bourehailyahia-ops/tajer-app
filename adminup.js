@@ -179,27 +179,26 @@
   // saveProduct مُعرَّفة داخل app.js كـ async function، وقد لا تكون
   // على window وقت التحميل. فنربط الرفع بزرّ الحفظ نفسه لضمان العمل.
   function hookSave() {
-    // أ) إن كانت الدالّة متاحة على window نعترضها
-    if (!window.__tjAdSaveHooked && typeof window.saveProduct === 'function') {
-      window.__tjAdSaveHooked = true;
-      var orig = window.saveProduct;
-      window.saveProduct = async function () {
-        var r = await orig.apply(this, arguments);
-        try { await afterSave(); } catch (e) { console.warn('tj upload:', e); }
-        return r;
-      };
-      return;
-    }
-    // ب) وإلا نربط الزرّ مباشرة
+    // نربط الزرّ دائماً — لا نكتفي باعتراض window.saveProduct لأن الزرّ
+    // في app.js يستدعي النسخة الداخلية لا المعترَضة، فيفشل الاعتراض صامتاً.
     var btns = document.querySelectorAll('[onclick*="saveProduct"]');
     for (var i = 0; i < btns.length; i++) {
       if (btns[i].__tjB) continue;
       btns[i].__tjB = 1;
       btns[i].addEventListener('click', function () {
+        var pending = newImgs.length || newFile;
+        if (!pending) return;
+        var n = $('tjNote');
+        if (n) n.textContent = '⏳ جارٍ رفع الصور…';
         // نمهل الحفظ الأصلي ثم نرفع
         setTimeout(function () {
-          afterSave().catch(function (e) { console.warn('tj upload:', e); });
-        }, 900);
+          afterSave().then(function () {
+            if (n) n.textContent = '✓ رُفعت الصور';
+          }).catch(function (e) {
+            if (n) n.textContent = '❌ ' + String(e.message || e).slice(0, 80);
+            console.warn('tj upload:', e);
+          });
+        }, 1100);
       });
     }
   }
