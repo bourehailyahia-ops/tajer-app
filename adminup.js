@@ -75,6 +75,7 @@
         '<label class="tj-up-b"><input type="file" id="tjImgs" accept="image/*" multiple hidden>' +
           '📷 اختر صوراً</label>' +
         '<div id="tjNew" class="tj-g"></div>' +
+        '<div id="tjNote" class="tj-up-s" style="margin-top:7px"></div>' +
         '<div id="tjIBar" class="tj-bar"><div id="tjIFill" class="tj-fill"></div></div>' +
       '</div>' +
       '<div class="tj-up">' +
@@ -120,17 +121,33 @@
 
   function bind() {
     var im = $('tjImgs'), fl = $('tjFile');
-    if (im) im.addEventListener('change', function () {
+    // الحماية من تكرار المستمع: bind تُستدعى كلما فُتحت النافذة،
+    // وبلا هذا الحارس يُسجَّل مستمع جديد كل مرة فتضيع الملفات.
+    if (im && !im.__tjBound) {
+      im.__tjBound = 1;
+      im.addEventListener('change', function () {
       var list = Array.prototype.slice.call(im.files || []);
+      var room = 6 - (gallery.length + newImgs.length);
+      var skipped = 0;
       for (var i = 0; i < list.length; i++) {
-        if (gallery.length + newImgs.length >= 6) break;
-        if (String(list[i].type).indexOf('image/') !== 0) continue;
-        if (list[i].size > 8 * 1024 * 1024) continue;
+        if (newImgs.length + gallery.length >= 6) { skipped++; continue; }
+        if (String(list[i].type).indexOf('image/') !== 0) { skipped++; continue; }
+        if (list[i].size > 8 * 1024 * 1024) { skipped++; continue; }
         newImgs.push({ file: list[i], url: URL.createObjectURL(list[i]) });
       }
       im.value = ''; drawNew();
-    });
-    if (fl) fl.addEventListener('change', function () {
+      var n = $('tjNote');
+      if (n) {
+        n.textContent = skipped
+          ? ('أُضيفت ' + newImgs.length + ' — تُجوهلت ' + skipped +
+             ' (الحد 6 صور، وحتى 8 م.ب للصورة)')
+          : (newImgs.length ? ('أُضيفت ' + newImgs.length + ' صورة جديدة') : '');
+      }
+      });
+    }
+    if (fl && !fl.__tjBound) {
+      fl.__tjBound = 1;
+      fl.addEventListener('change', function () {
       var f = fl.files && fl.files[0];
       if (!f) return;
       if (f.size > 50 * 1024 * 1024) {
@@ -140,7 +157,8 @@
       newFile = f;
       $('tjFName').innerHTML = '✓ ' + esc(f.name.slice(0, 34)) +
         ' (' + (f.size / 1048576).toFixed(1) + ' م.ب)';
-    });
+      });
+    }
   }
 
   // ── اعتراض فتح النموذج ──
