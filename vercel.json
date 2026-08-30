@@ -70,5 +70,29 @@
         }
       ]
     }
+  ],
+  "redirects": [
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "tajer-app.vercel.app"
+        }
+      ],
+      "destination": "https://mytajer.com/$1",
+      "permanent": true
+    },
+    {
+      "source": "/(.*)",
+      "has": [
+        {
+          "type": "host",
+          "value": "www.mytajer.com"
+        }
+      ],
+      "destination": "https://mytajer.com/$1",
+      "permanent": true
+    }
   ]
 }
