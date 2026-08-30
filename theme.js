@@ -224,7 +224,7 @@
       '@media(min-width:620px){#shopList{grid-template-columns:repeat(3,1fr)}}' +
 
       /* الغلاف */
-      '.tj-cover{position:relative;width:100%;aspect-ratio:1;background:#1a1e27;' +
+      '.tj-cover{position:relative;width:100%;aspect-ratio:2/1;background:#1a1e27;' +
         'cursor:pointer;flex-shrink:0}' +
       '.tj-cover img{width:100%;height:100%;object-fit:cover;display:block}' +
       '.tj-count{position:absolute;bottom:6px;inset-inline-start:6px;' +
