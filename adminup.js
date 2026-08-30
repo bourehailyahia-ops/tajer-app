@@ -121,7 +121,11 @@
         'color:#fff;border:0;border-radius:50%;width:21px;height:21px;cursor:pointer;' +
         'font-size:.7rem;line-height:1;font-family:inherit}' +
       '.tj-cov{position:absolute;bottom:0;inset-inline:0;background:#C9A84C;color:#12151c;' +
-        'font-size:.55rem;font-weight:800;text-align:center;padding:2px}' +
+        'font-size:.55rem;font-weight:800;text-align:center;padding:3px}' +
+      '.tj-is-cov{border-color:#C9A84C!important;box-shadow:0 0 0 2px rgba(201,168,76,.35)}' +
+      '.tj-mk{position:absolute;bottom:0;inset-inline:0;background:rgba(0,0,0,.72);' +
+        'color:#fff;border:0;font-size:.52rem;padding:4px 2px;cursor:pointer;' +
+        'font-family:inherit;width:100%}' +
       '.tj-bar{height:5px;background:rgba(255,255,255,.1);border-radius:99px;' +
         'overflow:hidden;margin-top:8px;display:none}' +
       '.tj-bar.on{display:block}' +
@@ -145,7 +149,9 @@
     box.innerHTML =
       '<div class="tj-up">' +
         '<div class="tj-up-t">🖼️ صور المنتج</div>' +
-        '<div class="tj-up-s">أول صورة تصبح الغلاف. حتى 6 صور من معرض هاتفك.</div>' +
+        '<div class="tj-up-s">الصورة المحاطة بإطار ذهبي هي <b>الغلاف</b> — ' +
+          'وهي ما يراه المشتري في المتجر. اضغط «اجعلها الغلاف» على أي صورة لتبديلها. ' +
+          'حتى 6 صور.</div>' +
         '<div id="tjNow" class="tj-g"></div>' +
         '<label class="tj-up-b"><input type="file" id="tjImgs" accept="image/*" multiple hidden>' +
           '📷 اختر صوراً</label>' +
@@ -174,11 +180,24 @@
     var b = $('tjNow');
     if (!b) return;
     b.innerHTML = gallery.length ? gallery.map(function (u, i) {
-      return '<div class="tj-c"><img src="' + esc(u) + '">' +
+      return '<div class="tj-c' + (i === 0 ? ' tj-is-cov' : '') + '">' +
+        '<img src="' + esc(u) + '">' +
         '<button class="tj-x" onclick="tjAdRmOld(' + i + ')">✕</button>' +
-        (i === 0 ? '<div class="tj-cov">الغلاف</div>' : '') + '</div>';
+        (i === 0
+          ? '<div class="tj-cov">★ الغلاف</div>'
+          : '<button class="tj-mk" onclick="tjAdSetCov(' + i + ')">' +
+            'اجعلها الغلاف</button>') +
+        '</div>';
     }).join('') : '<div class="tj-up-s">لا صور بعد.</div>';
   }
+
+  // نقل صورة إلى المقدّمة لتصبح الغلاف
+  window.tjAdSetCov = function (i) {
+    if (i <= 0 || i >= gallery.length) return;
+    var u = gallery.splice(i, 1)[0];
+    gallery.unshift(u);
+    drawNow();
+  };
   window.tjAdRmOld = function (i) { gallery.splice(i, 1); drawNow(); };
 
   function drawNew() {
