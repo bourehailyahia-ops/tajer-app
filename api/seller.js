@@ -155,7 +155,7 @@ h1{font-size:1.5rem;margin:14px 0 6px}
 h2{font-size:1rem;margin:0}
 .sec{font-size:.82rem;color:var(--muted);margin:28px 0 12px;font-weight:600}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:16px;margin-bottom:14px;overflow:hidden}
-.cover{width:100%;height:170px;object-fit:cover;display:block}
+.cover{width:100%;height:85px;object-fit:cover;display:block}
 .card-body{padding:15px}
 .row{display:flex;gap:11px;align-items:flex-start}
 .ic{font-size:28px;flex-shrink:0}
@@ -182,8 +182,9 @@ padding:5px 13px;border-radius:20px;color:var(--muted)}
 justify-content:center;gap:9px;position:relative;overflow:hidden}
 .cover.gen::after{content:"";position:absolute;inset:0;
 background:radial-gradient(circle at 30% 20%,rgba(255,255,255,.22),transparent 60%)}
-.gen-ic{font-size:44px;filter:drop-shadow(0 3px 8px rgba(0,0,0,.35));z-index:1}
-.gen-t{font-size:.8rem;font-weight:700;color:#fff;text-align:center;padding:0 18px;
+.gen-ic{font-size:28px;filter:drop-shadow(0 3px 8px rgba(0,0,0,.35));z-index:1}
+.gen-t{font-size:.7rem;font-weight:700;color:#fff;text-align:center;padding:0 14px;
+overflow:hidden;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;
 text-shadow:0 2px 6px rgba(0,0,0,.45);z-index:1;line-height:1.4}
 .trust{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:22px}
 .ti{background:var(--panel);border:1px solid var(--line);border-radius:12px;
@@ -282,4 +283,4 @@ padding:14px;border-radius:12px;text-decoration:none;font-size:.95rem}
   // كاش على الحافة مع إعادة تحقّق — الصفحة سريعة والتحديث يظهر خلال دقيقة
   res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate=600');
   res.status(200).send(html);
-              }
+  }
