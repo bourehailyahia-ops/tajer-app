@@ -158,6 +158,13 @@
   var DPKEY = 'sb_publishable_ly90vH9XsCT_05kxQenomw_LE5aCud-';
   var dpCache = null;
 
+  function esc(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+
   function dpLoad() {
     if (dpCache) return Promise.resolve(dpCache);
     return fetch(DPFN, {
@@ -172,7 +179,7 @@
         ((d && d.products) || []).forEach(function (p) {
           var g = Array.isArray(p.gallery) ? p.gallery : [];
           if (!g.length && p.cover_url) g = [p.cover_url];
-          if (g.length) dpCache[String(p.title).trim()] = g;
+          dpCache[String(p.title).trim()] = { imgs: g, p: p };
         });
         return dpCache;
       })
@@ -203,6 +210,100 @@
     }
   }
 
+
+  // زرّ يفتح معرض الصور والشرح الكامل قبل الشراء
+  function dpAddBtn(card, rec) {
+    if (card.__tjBtn) return;
+    if (!rec.imgs || !rec.imgs.length) return;
+    card.__tjBtn = 1;
+
+    var b = document.createElement('button');
+    b.className = 'tj-see';
+    b.textContent = '🖼️ شاهد الصور والتفاصيل';
+    b.style.cssText = 'width:100%;background:rgba(201,168,76,.12);' +
+      'border:1px solid rgba(201,168,76,.35);border-radius:10px;padding:10px;' +
+      'margin-top:10px;font-size:.8rem;font-weight:600;color:#C9A84C;' +
+      'cursor:pointer;font-family:inherit';
+    b.addEventListener('click', function (e) {
+      e.stopPropagation();
+      dpModal(rec);
+    });
+
+    // نضعه قبل صفّ السعر ليبقى الشراء آخر ما يراه
+    var rows = card.querySelectorAll('div[style*="justify-content:space-between"]');
+    var last = rows[rows.length - 1];
+    if (last && last.parentNode === card) card.insertBefore(b, last);
+    else card.appendChild(b);
+  }
+
+  function dpModal(rec) {
+    var p = rec.p || {};
+    var imgs = rec.imgs || [];
+    var old = document.getElementById('tjDpModal');
+    if (old) old.remove();
+
+    var m = document.createElement('div');
+    m.id = 'tjDpModal';
+    m.style.cssText = 'position:fixed;inset:0;z-index:99998;background:rgba(8,10,14,.96);' +
+      'overflow-y:auto;padding:14px;font-family:inherit';
+
+    var strip = imgs.map(function (u, i) {
+      return '<img src="' + esc(u) + '" alt="" loading="lazy" ' +
+        'style="width:100%;border-radius:12px;margin-bottom:9px;display:block;' +
+        'background:#1a1e27" onerror="this.style.display=\'none\'">';
+    }).join('');
+
+    var chips = '';
+    if (p.format) chips += '<span class="tj-chip">📄 ' + esc(p.format) + '</span>';
+    if (p.pages)  chips += '<span class="tj-chip">' + esc(p.pages) + '</span>';
+    if (p.file_size) chips += '<span class="tj-chip">' + esc(p.file_size) + '</span>';
+
+    var contents = '';
+    if (p.contents) {
+      contents = '<div style="background:rgba(255,255,255,.04);border:1px solid ' +
+        'rgba(255,255,255,.09);border-radius:11px;padding:12px;margin-top:12px">' +
+        '<div style="font-size:.75rem;color:#C9A84C;font-weight:700;margin-bottom:7px">' +
+        'ماذا يحتوي</div>' +
+        String(p.contents).split('\n').filter(function (x) { return x.trim(); })
+          .map(function (x) {
+            return '<div style="font-size:.78rem;color:#c8ccd2;line-height:1.9">✓ ' +
+              esc(x.trim()) + '</div>';
+          }).join('') + '</div>';
+    }
+
+    m.innerHTML =
+      '<style>.tj-chip{font-size:.68rem;background:rgba(255,255,255,.07);' +
+        'border:1px solid rgba(255,255,255,.12);padding:4px 10px;border-radius:20px;' +
+        'color:#9aa0a6;margin-inline-end:6px;display:inline-block;margin-bottom:6px}</style>' +
+      '<div style="max-width:460px;margin:0 auto;color:#e8eaed">' +
+        '<button id="tjDpX" style="position:sticky;top:0;float:inline-end;' +
+          'background:rgba(0,0,0,.7);color:#fff;border:0;border-radius:50%;' +
+          'width:34px;height:34px;font-size:1.1rem;cursor:pointer;' +
+          'font-family:inherit;z-index:2">✕</button>' +
+        '<div style="clear:both;padding-top:6px">' +
+          '<h2 style="font-size:1.05rem;margin:0 0 4px;line-height:1.5">' +
+            esc(p.title || '') + '</h2>' +
+          (p.subtitle ? '<div style="font-size:.8rem;color:#9aa0a6;margin-bottom:10px">' +
+            esc(p.subtitle) + '</div>' : '') +
+          (chips ? '<div style="margin-bottom:12px">' + chips + '</div>' : '') +
+          strip +
+          (p.description ? '<div style="font-size:.82rem;color:#c8ccd2;line-height:1.9;' +
+            'white-space:pre-line;margin-top:12px">' + esc(p.description) + '</div>' : '') +
+          contents +
+          '<div style="height:14px"></div>' +
+        '</div>' +
+      '</div>';
+
+    document.body.appendChild(m);
+    document.body.style.overflow = 'hidden';
+    var close = function () {
+      m.remove();
+      document.body.style.overflow = '';
+    };
+    m.querySelector('#tjDpX').addEventListener('click', close);
+    m.addEventListener('click', function (e) { if (e.target === m) close(); });
+  }
+
   function dpScan() {
     var list = document.getElementById('shopList');
     if (!list || !list.children.length) return;
@@ -211,11 +312,14 @@
       var cards = list.children;
       for (var i = 0; i < cards.length; i++) {
         var c = cards[i];
-        if (c.__tjDp) continue;
+        // لا نتخطّى بعد رسم الصورة — الزرّ له حارسه الخاص
+        if (c.__tjDp && c.__tjBtn) continue;
         var nm = c.querySelector('div[style*="font-weight:700"]');
         if (!nm) continue;
-        var imgs = map[nm.textContent.trim()];
-        if (imgs && imgs.length) dpPaint(c, imgs);
+        var rec = map[nm.textContent.trim()];
+        if (!rec) continue;
+        if (rec.imgs && rec.imgs.length) dpPaint(c, rec.imgs);
+        dpAddBtn(c, rec);
       }
     });
   }
