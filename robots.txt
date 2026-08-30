@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://tajer-app.vercel.app/sitemap.xml
+Sitemap: https://mytajer.com/sitemap.xml
