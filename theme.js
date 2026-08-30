@@ -151,11 +151,81 @@
     }
   }
 
+
+  // ══════ 4) صور المنتجات في شاشة «المنتجات الرقمية» ══════
+  // الشاشة مبنيّة داخل app.js وتعرض الرمز فقط، فنستبدله بالغلاف.
+  var DPFN  = 'https://rnaqsvmtszxgbvzaagzx.supabase.co/functions/v1/digital-products';
+  var DPKEY = 'sb_publishable_ly90vH9XsCT_05kxQenomw_LE5aCud-';
+  var dpCache = null;
+
+  function dpLoad() {
+    if (dpCache) return Promise.resolve(dpCache);
+    return fetch(DPFN, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', apikey: DPKEY,
+                 Authorization: 'Bearer ' + DPKEY },
+      body: JSON.stringify({ action: 'list' })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (d) {
+        dpCache = {};
+        ((d && d.products) || []).forEach(function (p) {
+          var g = Array.isArray(p.gallery) ? p.gallery : [];
+          if (!g.length && p.cover_url) g = [p.cover_url];
+          if (g.length) dpCache[String(p.title).trim()] = g;
+        });
+        return dpCache;
+      })
+      .catch(function () { dpCache = {}; return dpCache; });
+  }
+
+  function dpPaint(card, imgs) {
+    if (card.__tjDp) return;
+    var span = card.querySelector('span');
+    if (!span) return;
+    card.__tjDp = 1;
+
+    var img = document.createElement('img');
+    img.src = imgs[0];
+    img.alt = '';
+    img.loading = 'lazy';
+    img.style.cssText = 'width:58px;height:58px;object-fit:cover;' +
+      'border-radius:11px;flex-shrink:0;background:#1a1e27;display:block';
+    // إن تعذّر تحميل الصورة نُرجع الرمز بدل مربّع فارغ
+    img.onerror = function () { try { img.replaceWith(span); } catch (e) {} };
+    span.replaceWith(img);
+
+    if (imgs.length > 1) {
+      var t = document.createElement('div');
+      t.textContent = '📷 ' + imgs.length + ' صور';
+      t.style.cssText = 'font-size:.63rem;color:#9aa0a6;margin-top:4px';
+      if (img.parentNode) img.parentNode.appendChild(t);
+    }
+  }
+
+  function dpScan() {
+    var list = document.getElementById('shopList');
+    if (!list || !list.children.length) return;
+    dpLoad().then(function (map) {
+      if (!map || !Object.keys(map).length) return;
+      var cards = list.children;
+      for (var i = 0; i < cards.length; i++) {
+        var c = cards[i];
+        if (c.__tjDp) continue;
+        var nm = c.querySelector('div[style*="font-weight:700"]');
+        if (!nm) continue;
+        var imgs = map[nm.textContent.trim()];
+        if (imgs && imgs.length) dpPaint(c, imgs);
+      }
+    });
+  }
+
   function run() {
     try { injectCSS(); } catch (e) {}
     try { calmIcons(); } catch (e) {}
     try { hookLang(); } catch (e) {}
     try { translateCards(); } catch (e) {}
+    try { dpScan(); } catch (e) {}
   }
 
   if (document.readyState === 'loading') {
