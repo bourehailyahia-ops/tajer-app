@@ -240,9 +240,19 @@
       /* نصوص أصغر تناسب العمودين */
       '#shopList div[style*="font-weight:700"]{font-size:.82rem!important;' +
         'line-height:1.45!important}' +
-      /* الوصف الطويل والمحتويات تُخفى — تظهر في المعاينة */
+      /* البطاقة تعرض: الغلاف · الاسم · معاينة · السعر — لا أكثر.
+         الوصف والتفاصيل تظهر داخل نافذة المعاينة. */
       '#shopList div[style*="white-space:pre-line"]{display:none!important}' +
-      '#shopList div[style*="ماذا يحتوي"]{display:none!important}';
+      /* صندوق «ماذا يحتوي» */
+      '#shopList div[style*="border-radius:10px"][style*="padding:10px 12px"]' +
+        '{display:none!important}' +
+      /* الوصف الفرعي تحت الاسم */
+      '#shopList div[style*="font-size:.76rem"][style*="margin-top:2px"]' +
+        '{display:none!important}' +
+      /* شارات الصيغة وعدد الصفحات */
+      '#shopList div[style*="flex-wrap:wrap"]{display:none!important}' +
+      /* رابط المعاينة القديم — استبدله زرّنا */
+      '#shopList a[target="_blank"]{display:none!important}';
     document.head.appendChild(st);
   }
 
