@@ -186,30 +186,65 @@
       .catch(function () { dpCache = {}; return dpCache; });
   }
 
-  function dpPaint(card, imgs) {
+  // نحوّل البطاقة إلى شكل متجر: غلاف كبير أعلى، ثم الاسم والسعر
+  function dpPaint(card, rec) {
     if (card.__tjDp) return;
-    var span = card.querySelector('span');
-    if (!span) return;
+    var imgs = rec.imgs || [];
+    if (!imgs.length) return;
     card.__tjDp = 1;
 
-    var img = document.createElement('img');
-    img.src = imgs[0];
-    img.alt = '';
-    img.loading = 'lazy';
-    img.style.cssText = 'width:58px;height:58px;object-fit:cover;' +
-      'border-radius:11px;flex-shrink:0;background:#1a1e27;display:block';
-    // إن تعذّر تحميل الصورة نُرجع الرمز بدل مربّع فارغ
-    img.onerror = function () { try { img.replaceWith(span); } catch (e) {} };
-    span.replaceWith(img);
+    // الرمز الصغير لم يعد مطلوباً — الغلاف يحلّ محلّه
+    // الرمز قد يُكتب بمسافات مختلفة، فنبحث عن أول span في البطاقة
+    var span = card.querySelector('span');
+    if (span && !span.className) span.style.display = 'none';
 
-    if (imgs.length > 1) {
-      var t = document.createElement('div');
-      t.textContent = '📷 ' + imgs.length + ' صور';
-      t.style.cssText = 'font-size:.63rem;color:#9aa0a6;margin-top:4px';
-      if (img.parentNode) img.parentNode.appendChild(t);
-    }
+    var cover = document.createElement('div');
+    cover.className = 'tj-cover';
+    cover.innerHTML =
+      '<img src="' + esc(imgs[0]) + '" alt="" loading="lazy">' +
+      (imgs.length > 1
+        ? '<span class="tj-count">📷 ' + imgs.length + '</span>'
+        : '');
+    cover.addEventListener('click', function (e) {
+      e.stopPropagation();
+      dpModal(rec);
+    });
+    card.insertBefore(cover, card.firstChild);
   }
 
+  function dpGridCSS() {
+    if (document.getElementById('tjDpCss')) return;
+    var st = document.createElement('style');
+    st.id = 'tjDpCss';
+    st.textContent =
+      /* شبكة بعمودين على الهاتف */
+      '#shopList{display:grid;grid-template-columns:repeat(2,1fr);gap:11px}' +
+      '#shopList>div{margin-bottom:0!important;padding:0!important;overflow:hidden;' +
+        'display:flex;flex-direction:column}' +
+      '@media(min-width:620px){#shopList{grid-template-columns:repeat(3,1fr)}}' +
+
+      /* الغلاف */
+      '.tj-cover{position:relative;width:100%;aspect-ratio:1;background:#1a1e27;' +
+        'cursor:pointer;flex-shrink:0}' +
+      '.tj-cover img{width:100%;height:100%;object-fit:cover;display:block}' +
+      '.tj-count{position:absolute;bottom:6px;inset-inline-start:6px;' +
+        'background:rgba(0,0,0,.72);color:#fff;font-size:.6rem;padding:2px 7px;' +
+        'border-radius:20px}' +
+
+      /* المحتوى تحت الغلاف */
+      '#shopList>div>div:not(.tj-cover){padding:0 10px}' +
+      '#shopList>div>div:first-of-type{padding-top:10px}' +
+      '#shopList .tj-see{margin:8px 10px 0!important;width:calc(100% - 20px)!important}' +
+      '#shopList>div>div:last-child{padding-bottom:10px;margin-top:auto}' +
+
+      /* نصوص أصغر تناسب العمودين */
+      '#shopList div[style*="font-weight:700"]{font-size:.82rem!important;' +
+        'line-height:1.45!important}' +
+      /* الوصف الطويل والمحتويات تُخفى — تظهر في المعاينة */
+      '#shopList div[style*="white-space:pre-line"]{display:none!important}' +
+      '#shopList div[style*="ماذا يحتوي"]{display:none!important}';
+    document.head.appendChild(st);
+  }
 
   // زرّ يفتح معرض الصور والشرح الكامل قبل الشراء
   function dpAddBtn(card, rec) {
@@ -219,7 +254,7 @@
 
     var b = document.createElement('button');
     b.className = 'tj-see';
-    b.textContent = '🖼️ شاهد الصور والتفاصيل';
+    b.textContent = '👁️ معاينة';
     b.style.cssText = 'width:100%;background:rgba(201,168,76,.12);' +
       'border:1px solid rgba(201,168,76,.35);border-radius:10px;padding:10px;' +
       'margin-top:10px;font-size:.8rem;font-weight:600;color:#C9A84C;' +
@@ -248,9 +283,16 @@
       'overflow-y:auto;padding:14px;font-family:inherit';
 
     var strip = imgs.map(function (u, i) {
-      return '<img src="' + esc(u) + '" alt="" loading="lazy" ' +
-        'style="width:100%;border-radius:12px;margin-bottom:9px;display:block;' +
-        'background:#1a1e27" onerror="this.style.display=\'none\'">';
+      return '<div style="position:relative;margin-bottom:9px">' +
+        '<img src="' + esc(u) + '" alt="" loading="lazy" ' +
+        'style="width:100%;border-radius:12px;display:block;background:#1a1e27" ' +
+        'onerror="this.parentNode.style.display=\'none\'">' +
+        (i === 0
+          ? '<span style="position:absolute;top:8px;inset-inline-start:8px;' +
+            'background:#C9A84C;color:#12151c;font-size:.6rem;font-weight:800;' +
+            'padding:3px 9px;border-radius:20px">الغلاف</span>'
+          : '') +
+        '</div>';
     }).join('');
 
     var chips = '';
@@ -307,6 +349,7 @@
   function dpScan() {
     var list = document.getElementById('shopList');
     if (!list || !list.children.length) return;
+    dpGridCSS();
     dpLoad().then(function (map) {
       if (!map || !Object.keys(map).length) return;
       var cards = list.children;
@@ -318,7 +361,7 @@
         if (!nm) continue;
         var rec = map[nm.textContent.trim()];
         if (!rec) continue;
-        if (rec.imgs && rec.imgs.length) dpPaint(c, rec.imgs);
+        if (rec.imgs && rec.imgs.length) dpPaint(c, rec);
         dpAddBtn(c, rec);
       }
     });
