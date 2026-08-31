@@ -61,6 +61,10 @@ border-radius:10px;padding:11px 13px;font-size:.8rem;color:var(--warn);margin-to
 .ftbl th{color:var(--muted);font-weight:600;text-align:start;padding:5px 4px;
 border-bottom:1px solid var(--line)}
 .ftbl td{padding:6px 4px;border-bottom:1px solid var(--line)}
+.btn-s{display:inline-block;background:rgba(255,255,255,.06);
+border:1px solid var(--line);border-radius:9px;padding:8px 13px;font-size:.75rem;
+color:var(--text);text-decoration:none}
+.btn-s:active{opacity:.7}
 </style>
 </head>
 <body>
@@ -92,6 +96,9 @@ border-bottom:1px solid var(--line)}
       <div class="st"><b id="kFees">—</b><span>رسوم البوابة</span></div>
       <div class="st"><b id="kClicks">—</b><span>نقرة إحالة</span></div>
     </div>
+
+    <h2>👥 بائعوني — تواصل مباشر</h2>
+    <div id="sellersBox"><p class="empty">—</p></div>
 
     <h2>📦 تتبّع الطرود — هذا الشهر</h2>
     <div id="trkBox"><p class="empty">—</p></div>
@@ -158,6 +165,36 @@ async function appSession() {
     if (data && data.session) return data.session;
   } catch (_) {}
   return raw.user && raw.user.id ? { user: raw.user } : null;
+}
+
+async function loadSellers() {
+  const { data, error } = await sb.rpc('admin_sellers');
+  if (error || !data || data.error) { $('sellersBox').innerHTML = ''; return; }
+  if (!data.length) {
+    $('sellersBox').innerHTML = '<p class="empty">لا بائعين بعد.</p>'; return;
+  }
+  $('sellersBox').innerHTML = data.map((s) => {
+    const wa = s.whatsapp ? String(s.whatsapp).replace(/\D/g, '').replace(/^0/, '213') : '';
+    // ما يحتاج تنبيهاً — نُظهره ليعرف بماذا يراسله
+    const flags = [];
+    if (s.needs_info > 0) flags.push(`<span class="tag warn">${s.needs_info} منتج مادي بلا هاتف/موقع</span>`);
+    if (s.no_img > 0) flags.push(`<span class="tag warn">${s.no_img} بلا صورة</span>`);
+    if (s.products === 0) flags.push('<span class="tag">لم يضف منتجاً بعد</span>');
+    if (Number(s.owed) > 0) flags.push(`<span class="tag">مستحق ${dz(s.owed)}</span>`);
+
+    return `<div class="card">
+      <div class="ttl">${esc(s.name)} <span style="font-size:.72rem;color:var(--muted)">/${esc(s.slug)}</span></div>
+      <div class="sub">${s.live} منتج منشور · ${s.sales} بيع · ${new Date(s.created_at).toLocaleDateString('ar-DZ')}</div>
+      ${flags.length ? `<div style="margin:7px 0">${flags.join(' ')}</div>` : ''}
+      <div class="kv" style="direction:ltr;text-align:start">${esc(s.email || '—')}</div>
+      <div style="display:flex;gap:7px;margin-top:9px;flex-wrap:wrap">
+        ${wa ? `<a class="btn-s" href="https://wa.me/${wa}" target="_blank" rel="noopener">💬 واتساب</a>` : ''}
+        ${s.whatsapp ? `<a class="btn-s" href="tel:${esc(String(s.whatsapp).replace(/\s/g,''))}">📞 اتصال</a>` : ''}
+        ${s.email ? `<a class="btn-s" href="mailto:${esc(s.email)}">✉️ بريد</a>` : ''}
+        <a class="btn-s" href="https://mytajer.com/s/${esc(s.slug)}" target="_blank" rel="noopener">🏪 متجره</a>
+      </div>
+    </div>`;
+  }).join('');
 }
 
 async function loadTrack() {
@@ -251,6 +288,7 @@ async function load() {
   renderPayouts(data.payouts_pending || []);
   loadFunnel();
   loadTrack();
+  loadSellers();
 }
 
 function renderSellers(rows) {
@@ -362,4 +400,4 @@ window.markPayout = async (id, status) => {
 })().catch(() => { hide('loading'); show('denied'); });
 </script>
 </body>
-  </html>
+                        </html>
