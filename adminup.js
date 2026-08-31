@@ -148,6 +148,27 @@
     var box = document.createElement('div');
     box.innerHTML =
       '<div class="tj-up">' +
+        '<div class="tj-up-t">📦 نوع المنتج</div>' +
+        '<select id="tjType" class="f-input" style="margin-top:9px" ' +
+          'onchange="tjTypeChange()">' +
+          '<option value="digital">رقمي — يُدفع عبر تاجر ويُحمَّل</option>' +
+          '<option value="physical">مادي — المشتري يتواصل معك مباشرة</option>' +
+        '</select>' +
+        '<div id="tjPhys" style="display:none;margin-top:10px">' +
+          '<div class="tj-up-s" style="margin-bottom:8px">' +
+            'المنتج المادي إعلان: المشتري يتصل بك، والاتفاق بينكما. ' +
+            'لا دفع عبر تاجر ولا عمولة.</div>' +
+          '<input id="tjLoc" class="f-input" placeholder="الولاية أو المدينة">' +
+          '<input id="tjPhone" class="f-input" dir="ltr" style="margin-top:8px" ' +
+            'placeholder="0555 12 34 56">' +
+          '<select id="tjDeliv" class="f-input" style="margin-top:8px">' +
+            '<option value="negotiable">التوصيل قابل للنقاش</option>' +
+            '<option value="yes">التوصيل متوفّر</option>' +
+            '<option value="no">بلا توصيل — الاستلام من المكان</option>' +
+          '</select>' +
+        '</div>' +
+      '</div>' +
+      '<div class="tj-up">' +
         '<div class="tj-up-t">🖼️ صور المنتج</div>' +
         '<div class="tj-up-s">الصورة المحاطة بإطار ذهبي هي <b>الغلاف</b> — ' +
           'وهي ما يراه المشتري في المتجر. اضغط «اجعلها الغلاف» على أي صورة لتبديلها. ' +
@@ -173,8 +194,27 @@
       ? '<span style="color:#2ECC71">✓ يوجد ملف مرفوع</span>'
       : '<span style="color:#E74C3C">⚠️ لا ملف — المشتري لن يستطيع التحميل</span>';
 
+    if ($('tjType')) {
+      $('tjType').value = (p && p.product_type) || 'digital';
+      if ($('tjLoc'))   $('tjLoc').value   = (p && p.location) || '';
+      if ($('tjPhone')) $('tjPhone').value = (p && p.contact_phone) || '';
+      if ($('tjDeliv')) $('tjDeliv').value = (p && p.delivery) || 'negotiable';
+      window.tjTypeChange();
+    }
     drawNow(); bind();
   }
+
+  window.tjTypeChange = function () {
+    var t = $('tjType') ? $('tjType').value : 'digital';
+    var box = $('tjPhys');
+    if (box) box.style.display = (t === 'physical') ? 'block' : 'none';
+    // المنتج المادي لا يحتاج ملف تحميل
+    var f = $('tjFile');
+    if (f && f.closest) {
+      var card = f.closest('.tj-up');
+      if (card) card.style.display = (t === 'physical') ? 'none' : 'block';
+    }
+  };
 
   function drawNow() {
     var b = $('tjNow');
@@ -316,6 +356,20 @@
     } else if (curId) {
       patch.gallery = gallery;
       patch.cover_url = gallery[0] || null;
+    }
+
+    // نوع المنتج وبياناته
+    var tEl = $('tjType');
+    if (tEl) {
+      patch.product_type = tEl.value;
+      if (tEl.value === 'physical') {
+        patch.location      = ($('tjLoc')   || {}).value || null;
+        patch.contact_phone = ($('tjPhone') || {}).value || null;
+        patch.delivery      = ($('tjDeliv') || {}).value || 'negotiable';
+        if (!patch.location || !patch.contact_phone) {
+          throw new Error('المنتج المادي يحتاج الموقع ورقم الهاتف');
+        }
+      }
     }
 
     if (newFile) {
