@@ -154,7 +154,7 @@
 
   // ══════ 4) صور المنتجات في شاشة «المنتجات الرقمية» ══════
   // الشاشة مبنيّة داخل app.js وتعرض الرمز فقط، فنستبدله بالغلاف.
-  var DPFN  = 'https://rnaqsvmtszxgbvzaagzx.supabase.co/functions/v1/digital-products';
+  var DPFN  = 'https://rnaqsvmtszxgbvzaagzx.supabase.co/rest/v1/rpc/market_products';
   var DPKEY = 'sb_publishable_ly90vH9XsCT_05kxQenomw_LE5aCud-';
   var dpCache = null;
 
@@ -171,12 +171,12 @@
       method: 'POST',
       headers: { 'Content-Type': 'application/json', apikey: DPKEY,
                  Authorization: 'Bearer ' + DPKEY },
-      body: JSON.stringify({ action: 'list' })
+      body: '{}'
     })
       .then(function (r) { return r.json(); })
       .then(function (d) {
         dpCache = {};
-        ((d && d.products) || []).forEach(function (p) {
+        (Array.isArray(d) ? d : []).forEach(function (p) {
           var g = Array.isArray(p.gallery) ? p.gallery : [];
           if (!g.length && p.cover_url) g = [p.cover_url];
           dpCache[String(p.title).trim()] = { imgs: g, p: p };
@@ -259,26 +259,36 @@
   // زرّ يفتح معرض الصور والشرح الكامل قبل الشراء
   function dpAddBtn(card, rec) {
     if (card.__tjBtn) return;
-    if (!rec.imgs || !rec.imgs.length) return;
+    var p = rec.p || {};
+    var physical = p.product_type === 'physical';
+    if (!physical && (!rec.imgs || !rec.imgs.length)) return;
     card.__tjBtn = 1;
 
     var b = document.createElement('button');
     b.className = 'tj-see';
-    b.textContent = '👁️ معاينة';
-    b.style.cssText = 'width:100%;background:rgba(201,168,76,.12);' +
-      'border:1px solid rgba(201,168,76,.35);border-radius:10px;padding:10px;' +
-      'margin-top:10px;font-size:.8rem;font-weight:600;color:#C9A84C;' +
+    b.textContent = physical ? '📞 تواصل مع البائع' : '👁️ معاينة';
+    b.style.cssText = 'width:100%;background:' +
+      (physical ? 'rgba(46,204,113,.14)' : 'rgba(201,168,76,.12)') + ';' +
+      'border:1px solid ' +
+      (physical ? 'rgba(46,204,113,.4)' : 'rgba(201,168,76,.35)') + ';' +
+      'border-radius:10px;padding:10px;margin-top:10px;font-size:.8rem;' +
+      'font-weight:600;color:' + (physical ? '#2ECC71' : '#C9A84C') + ';' +
       'cursor:pointer;font-family:inherit';
     b.addEventListener('click', function (e) {
       e.stopPropagation();
       dpModal(rec);
     });
 
-    // نضعه قبل صفّ السعر ليبقى الشراء آخر ما يراه
     var rows = card.querySelectorAll('div[style*="justify-content:space-between"]');
     var last = rows[rows.length - 1];
     if (last && last.parentNode === card) card.insertBefore(b, last);
     else card.appendChild(b);
+
+    // المنتج المادي لا يُشترى عبر المنصّة — نُخفي زرّ الشراء
+    if (physical && last) {
+      var buy = last.querySelector('button');
+      if (buy && !buy.className) buy.style.display = 'none';
+    }
   }
 
   function dpModal(rec) {
@@ -305,10 +315,49 @@
         '</div>';
     }).join('');
 
+    var physical = p.product_type === 'physical';
     var chips = '';
-    if (p.format) chips += '<span class="tj-chip">📄 ' + esc(p.format) + '</span>';
-    if (p.pages)  chips += '<span class="tj-chip">' + esc(p.pages) + '</span>';
-    if (p.file_size) chips += '<span class="tj-chip">' + esc(p.file_size) + '</span>';
+    if (physical) {
+      chips += '<span class="tj-chip" style="background:rgba(46,204,113,.15);' +
+        'border-color:rgba(46,204,113,.35);color:#2ECC71">📦 منتج مادي</span>';
+      if (p.location) chips += '<span class="tj-chip">📍 ' + esc(p.location) + '</span>';
+      if (p.delivery) {
+        var dl = { yes: '🚚 التوصيل متوفّر', no: '🚫 بلا توصيل',
+                   negotiable: '🤝 التوصيل قابل للنقاش' }[p.delivery];
+        if (dl) chips += '<span class="tj-chip">' + dl + '</span>';
+      }
+    } else {
+      if (p.format) chips += '<span class="tj-chip">📄 ' + esc(p.format) + '</span>';
+      if (p.pages)  chips += '<span class="tj-chip">' + esc(p.pages) + '</span>';
+      if (p.file_size) chips += '<span class="tj-chip">' + esc(p.file_size) + '</span>';
+    }
+
+    // بطاقة التواصل — تظهر للمنتج المادي فقط
+    var contact = '';
+    if (physical && p.contact_phone) {
+      var ph = String(p.contact_phone).replace(/\s/g, '');
+      var wa = ph.replace(/^0/, '213').replace(/[^0-9]/g, '');
+      contact =
+        '<div style="background:rgba(46,204,113,.1);border:1px solid rgba(46,204,113,.3);' +
+          'border-radius:12px;padding:14px;margin-top:14px">' +
+          '<div style="font-size:.75rem;color:#2ECC71;font-weight:700;margin-bottom:9px">' +
+            'تواصل مع البائع مباشرة</div>' +
+          '<div style="font-size:1.05rem;font-weight:800;direction:ltr;' +
+            'text-align:center;margin-bottom:11px;letter-spacing:1px">' +
+            esc(p.contact_phone) + '</div>' +
+          '<a href="tel:' + esc(ph) + '" style="display:block;background:#2ECC71;' +
+            'color:#0a1628;text-align:center;padding:11px;border-radius:10px;' +
+            'font-weight:800;font-size:.85rem;text-decoration:none;margin-bottom:8px">' +
+            '📞 اتصل الآن</a>' +
+          '<a href="https://wa.me/' + esc(wa) + '" target="_blank" rel="noopener" ' +
+            'style="display:block;background:rgba(255,255,255,.07);color:#e8eaed;' +
+            'text-align:center;padding:11px;border-radius:10px;font-weight:700;' +
+            'font-size:.85rem;text-decoration:none">💬 واتساب</a>' +
+          '<div style="font-size:.66rem;color:#9aa0a6;margin-top:11px;line-height:1.7">' +
+            '⚠️ الاتفاق والدفع يتمّان بينك وبين البائع مباشرة. ' +
+            'تاجر لا تتدخّل في هذه المعاملة ولا تضمنها.</div>' +
+        '</div>';
+    }
 
     var contents = '';
     if (p.contents) {
@@ -342,6 +391,7 @@
           (p.description ? '<div style="font-size:.82rem;color:#c8ccd2;line-height:1.9;' +
             'white-space:pre-line;margin-top:12px">' + esc(p.description) + '</div>' : '') +
           contents +
+          contact +
           '<div style="height:14px"></div>' +
         '</div>' +
       '</div>';
